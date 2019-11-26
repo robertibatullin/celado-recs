@@ -1,19 +1,14 @@
 from setuptools import setup
 
-setup(name='celado-recs',
+setup(name='celadorecs',
       version='0.1',
       description='Celado Recommender System',
-      url='',
+      url='https://github.com/robertibatullin/celado-recs',
       author='CeladoAI',
       author_email='r.ibatullin@celado-media.ru',
-      packages=['celado-recs'],
+      packages=['celadorecs'],
       install_requires=[
-          'flask', 'os', 'webbrowser', 
-          'threading', 
-          'shutil',
-          'warnings',
-          'datetime',
-          'pickle',
+          'flask', 
           'pandas',
           'numpy',
           'scipy',

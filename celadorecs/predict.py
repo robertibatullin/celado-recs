@@ -6,7 +6,7 @@ Created on Wed Jul 24 14:40:57 2019
 @author: robert
 """
 from flask import Flask, render_template, request, url_for, session
-from recslib import *
+from .recslib import *
 import os, webbrowser
 from threading import Timer
 
