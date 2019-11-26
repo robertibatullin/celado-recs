@@ -7,6 +7,7 @@ setup(name='celadorecs',
       author='CeladoAI',
       author_email='r.ibatullin@celado-media.ru',
       packages=['celadorecs'],
+      scripts=['bin/celadorecs'],
       install_requires=[
           'flask', 
           'pandas',
