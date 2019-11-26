@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="utf-8">
+    <title>Celado RECommender System log in</title>
+    <meta name="description" content="">
+
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+    
+    <meta property="og:image" content="path/to/image.jpg">
+    <link rel="icon" href="{{ url_for('static', filename='img/favicon/favicon1.ico') }}">
+    <link rel="apple-touch-icon" sizes="180x180" href="{{ url_for('static', filename='img/favicon/apple-touch-icon1-180x180.png') }}">
+    <meta name="theme-color" content="#000">
+
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/libs/bootstrap-reboot.min.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/libs/bootstrap-grid.min.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+
+</head>
+
+<body>
+    <section class="container dialog dialog_login dialog_center">
+        <div class="row dialog__title title">
+            <div class="col-12 title__item">
+                <h1 class="title__text">Celado RECommender System</h1>
+            </div>
+            
+        {% block message %}
+            {% if message != "" %}
+            <div class="col-12 title__item">
+                <h2 class="title__message error">{{ message }}</h2>
+            </div>
+            {% endif %}
+        {% endblock message %}
+
+        </div>
+        <form method="post" id="login" action="{{ url_for('login') }}" enctype="multipart/form-data" class="row dialog__main main main_common">
+            {% block form %}
+            <div class="col-12 main__item">
+                <input type="text" id="dealer" name="dealer" value="dealer1" placeholder="login" required>
+            </div>
+            <div class="col-12 main__item">
+                <input type="password" id="password" name="password" value="123" placeholder="password" required>
+            </div>
+            <div class="col-12 main__item">
+                <select name="lang" form="login">
+                    <!-- <option>Выберите язык</option> --><!-- This line is Placeholder -->
+                    <option value="en">English</option>
+                    <option value="ru">Русский</option>                    
+                </select>
+                <!-- <input type="radio" name="lang" value="ru" checked="true">Русский
+                <input type="radio" name="lang" value="en" >English -->
+            </div>
+            <div class="col-12 main__item main__item_login">
+                <button class="main__button button button_standard">Log in</button>
+            </div>
+            {% endblock form %}
+        </form>
+    </section>
+</body>
+
+<script src="{{ url_for('static', filename='js/libs/jquery.min.js') }}"></script>
+<script src="{{ url_for('static', filename='js/common.js') }}"></script>
+
+
+</html>
