@@ -1,0 +1,7 @@
+include README.md
+include celadorecs/static/*
+include celadorecs/static/img/*
+include celadorecs/static/css/*
+include celadorecs/static/js/*
+include celadorecs/templates/*
+

@@ -13,17 +13,6 @@ from threading import Timer
 app = Flask(__name__)
 app.secret_key = 'sk'
 
-def check_password(dealer, password, base):
-    with open(base,'r',encoding='utf-8') as f:
-        rows = f.readlines()
-    passwords = {row.split(',')[0]:row.split(',')[1].strip() \
-                       for row in rows[1:]}
-    if not dealer in passwords:
-        return 'No such dealer'
-    if password != passwords[dealer]:
-        return 'Incorrect password'
-    return 'OK'
-
 @app.route('/')
 def index():
     return render_template('login.html',
@@ -31,17 +20,15 @@ def index():
 
 @app.route('/login', methods=['POST','GET'])
 def login():
-    dealer = request.form['dealer']
-    password = request.form['password']
-    password_check_msg = check_password(dealer, password, 
-                                        os.path.join('model', 'users.csv'))
-    if password_check_msg == 'OK':
-        session['dealer']  = dealer         
-        session['lang'] = request.form['lang']
+    session['lang'] = 'en'
+    model_path = request.form['model_path']
+    if os.path.exists(model_path) and os.path.isdir(model_path):
+        session['model_path']  = model_path         
         return render_template('input.html')
     else:
         return render_template('login.html', 
-                               message = password_check_msg)
+                               message = 'Folder not found!')
+
     
 @app.route('/input', methods=['POST','GET'])
 def input_():
@@ -72,7 +59,7 @@ def show_offers():
         return render_template('notfound.html', 
                            message = {'en':'No data input.',
                                       'ru':'Данные не введены'}[session['lang']])
-    ds = RecommenderSystem(dealer = session['dealer'], 
+    ds = RecommenderSystem(model_path = session['model_path'], 
                            mode=mode)
     if mode == 'predict':
         file = request.files['input_table']
@@ -80,7 +67,6 @@ def show_offers():
         temp_filename = os.path.join(os.getcwd(), 'temp.'+file_type)
         file.save(temp_filename)
         raw_df = read_table(temp_filename)
-        print(raw_df)
         results = ds.predict(raw_df, num)
         os.remove(temp_filename)
     elif mode == 'read':
@@ -93,7 +79,7 @@ def show_offers():
                                               'ru':'Клиент не найден в базе'}[session['lang']])
             else:
                 results = [result]
-    tables, footers = write_and_show_results(results, session['lang'])
+    tables, footers = ds.write_and_show_results(results, session['lang'])
     result = {footers[i]:tables[i] for i in range(len(tables))}
     return render_template('show.html', 
                            header = 'Propensity to buy',
@@ -111,14 +97,14 @@ def show_customers():
     mname = request.form['mname']
     if mname != 'nothing':
         mname += ':'+request.form['new_used']
-    ds = RecommenderSystem(dealer = session['dealer'], 
+    ds = RecommenderSystem(model_path = session['model_path'], 
                            mode='read')
     result = ds.get_top_from_table(mname, 'customers', num, True)
     if result is None:
         return render_template('notfound.html', 
                            message = {'en':'Model not found in the database.',
                                       'ru':'Модель не найдена в базе'}[session['lang']])
-    tables, footers = write_and_show_results([result], session['lang'])
+    tables, footers = ds.write_and_show_results([result], session['lang'])
     result = {footers[i]:tables[i] for i in range(len(tables))}
     return render_template('show.html', 
                            header = mname,
@@ -130,7 +116,7 @@ def show_retrain():
         return render_template('notfound.html', 
                            message = {'en':'No data input.',
                                       'ru':'Данные не введены'}[session['lang']])
-    ds = RecommenderSystem(dealer = session['dealer'], 
+    ds = RecommenderSystem(model_path = session['model_path'], 
                            mode = 'create')
     file = request.files['retrain_table']
     file_type = file.filename.split('.')[-1]

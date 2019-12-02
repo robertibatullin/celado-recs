@@ -3,7 +3,7 @@
 
 # # Библиотека общих функций для анализа данных Caterpillar
 
-import os
+import os, re
 from shutil import copyfileobj
 from datetime import datetime
 import pickle
@@ -102,28 +102,25 @@ class RecommenderSystem():
     
     def __init__(self,
                  source_filename = None,
-                 dealer = 'dealer1',
+                 model_path = 'model',
                  version = 'last',
                  target_var = 'Offer: Model',
                  mode = 'read',#explore|train|predict|precompute|read (from precomputed predictions) 
                  min_samples_in_class = 1,
                  test_size = 0,
                  **kwargs): 
-        dealer_dir = os.path.join('model',
-                                  'dealer_data',
-                                  dealer)
+        self.model_path = model_path
+        version_list = list(filter(lambda s:re.match('\d+\.\d+', s) is not None,
+                              os.listdir(self.model_path) ))
+        version_list = filter(lambda s:os.path.isdir(os.path.join(self.model_path,s)),
+                              version_list)
         if version == 'last':
-            versions = [dirname for dirname in os.listdir(dealer_dir) \
-                        if dirname != 'temp' and \
-                        os.path.isdir(os.path.join(dealer_dir,dirname))]
-            self.version = sorted(versions)[-1]
+            self.version = sorted(version_list)[-1]
         else:
             self.version = version
-        print('Initializing recommender system for dealer "{0}" (version {2}) for {1} mode'.format(
-                dealer, mode, self.version))
-        folder = os.path.join(dealer_dir,
+        print(f'Initializing recommender system (version {self.version}) for {mode} mode')
+        folder = os.path.join(self.model_path,
                               self.version)
-        self.dealer = dealer
         self.folder = folder
         self.target_var = target_var
         self.clf_name = 'rf'
@@ -257,12 +254,8 @@ class RecommenderSystem():
         self.mode = new_mode
                         
     def unite(self, other, version):
-        if self.dealer != other.dealer:
-            return None
         print('Uniting RecommenderSystem versions {0} and {1}'.format(self.version, other.version))
-        folder = os.path.join('model',
-                      'dealer_data',
-                      self.dealer,
+        folder = os.path.join(self.model_path,
                       version)
         if not os.path.exists(folder):
             os.mkdir(folder)
@@ -271,7 +264,7 @@ class RecommenderSystem():
             f2 = pd.read_csv(os.path.join(other.folder, wd))
             f = pd.concat([f1,f2], join='outer', ignore_index=True)
             f.to_csv(os.path.join(folder, wd), index=False)
-        return RecommenderSystem(dealer = self.dealer,
+        return RecommenderSystem(model_path = self.model_path,
                                  version = version, 
                                  mode='create',
                                  test_size = self.test_size)
@@ -536,7 +529,7 @@ class RecommenderSystem():
     def retrain(self, new_data_file):
         time = datetime.now().strftime('%Y-%m-%d %H:%M')
         new = RecommenderSystem(new_data_file,
-                                dealer = self.dealer,
+                                model_path = self.model_path,
                                 version = 'temp',
                                 mode = 'create')
         version_ = self.version.split('.')
@@ -555,9 +548,7 @@ class RecommenderSystem():
                 new_version,
                 os.path.split(new_data_file)[-1],
                 self.version)
-        print(time, log_str, file = open(os.path.join('model',
-                                     'dealer_data',
-                                     self.dealer,
+        print(time, log_str, file = open(os.path.join(self.model_path,
                                      'update.log'),'a'))
         return updated, log_str
                 
@@ -708,6 +699,20 @@ class RecommenderSystem():
             means[top_size] = {'pos':np.mean(recalls[top_size]['pos']),
                                'neg':np.mean(recalls[top_size]['neg'])}        
         return means
+    
+    def write_and_show_results(self, results, lang='en'):
+        tables, footers = [], []
+        for i,result in enumerate(results):
+            filename = os.path.join(self.model_path,
+                                    'results',
+                                    now.strftime("%Y-%m-%d_%H-%M")+'_'+str(i)+'.xlsx')
+            result.to_excel(filename, index=False)
+            tables.append(  result.to_html(index=False) )
+            if lang == 'ru':
+                footers.append( 'Результат сохранён в файл {}'.format(filename) )
+            elif lang == 'en':
+                footers.append( 'Results saved to the file {}'.format(filename) )
+        return tables, footers
         
 def info(name, X, y, Xind):
     s = '{} dataset\n'.format(name)
@@ -731,19 +736,6 @@ def read_table(source):
     else:
         raise TypeError('Input file must be .xlsx or .csv')
 
-def write_and_show_results(results, lang='en'):
-    tables, footers = [], []
-    for i,result in enumerate(results):
-        filename = os.path.join('results',
-                                now.strftime("%Y-%m-%d_%H-%M")+'_'+str(i)+'.xlsx')
-        result.to_excel(filename, index=False)
-        tables.append(  result.to_html(index=False) )
-        if lang == 'ru':
-            footers.append( 'Результат сохранён в файл {}'.format(filename) )
-        elif lang == 'en':
-            footers.append( 'Results saved to the file {}'.format(filename) )
-    return tables, footers
-  
 def group_by_id(data, ids):
     #группируем все данные одного ids в 1 строку
     #Existing переменные суммируем (bool), Customer + Offer усредняем (num)
@@ -905,23 +897,7 @@ if __name__ == "__main__":
    
     ds = RecommenderSystem(
             source_filename = '/home/robert/projects/celado/caterpillar/raw data/Data for Customers Clustering 19.02.2019.xlsx',
-            dealer = 'dealer1',
             version = '1.0',
 #            test_size = 0.25,
             mode = 'read')
     
-    cn = 'C46785'#'C51514'
-    top = ds.get_top_from_table(cn, 'offers', 10, True)
-    print(top)
-
-#    new_data_file = '/home/robert/projects/celado/caterpillar/release/sample_inputs/new1.xlsx'
-#    ds, log_str = ds.retrain(new_data_file)
-#    print(log_str)
-
-#    top_sizes = [10]#,5,1]
-#    recalls = ds.recall_at_k(top_sizes, 200)
-#    for top_size in top_sizes:
-#        print('At top-{}:'.format(top_size))
-#        print('Mean recall for negative (sold nothing) samples: {:.4f}'.format(recalls[top_size]['neg']))
-#        print('Mean recall for positive (sold something) samples: {:.4f}'.format(recalls[top_size]['pos']))
-#        print()

@@ -1,7 +1,7 @@
 from setuptools import setup
 
 setup(name='celadorecs',
-      version='0.1',
+      version='0.5',
       description='Celado Recommender System',
       url='https://github.com/robertibatullin/celado-recs',
       author='CeladoAI',
@@ -15,4 +15,5 @@ setup(name='celadorecs',
           'scipy',
           'scikit-learn'
       ],
-      zip_safe=False)
+      zip_safe=False,
+      include_package_data=True)

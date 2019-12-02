@@ -3,7 +3,7 @@
 
 <head>
     <meta charset="utf-8">
-    <title>Celado RECommender System log in</title>
+    <title>Celado RECommender System enter</title>
     <meta name="description" content="">
 
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
@@ -38,24 +38,17 @@
         </div>
         <form method="post" id="login" action="{{ url_for('login') }}" enctype="multipart/form-data" class="row dialog__main main main_common">
             {% block form %}
-            <div class="col-12 main__item">
-                <input type="text" id="dealer" name="dealer" value="dealer1" placeholder="login" required>
+
+            <div class="col-12 footer__item input__file-button-wrapper small">
+                <label class="input__file-button">
+                  <span class="input__file-button-text">Enter full path to "model" folder (e.g. "C:\model")</span>
+                  <input type="text" id="model_path" name="model_path">
+                </label>
             </div>
-            <div class="col-12 main__item">
-                <input type="password" id="password" name="password" value="123" placeholder="password" required>
+            <div class="col-12 footer__item small">
+                <button class="footer__button button button_standard">Start working</button>
             </div>
-            <div class="col-12 main__item">
-                <select name="lang" form="login">
-                    <!-- <option>Выберите язык</option> --><!-- This line is Placeholder -->
-                    <option value="en">English</option>
-                    <option value="ru">Русский</option>                    
-                </select>
-                <!-- <input type="radio" name="lang" value="ru" checked="true">Русский
-                <input type="radio" name="lang" value="en" >English -->
-            </div>
-            <div class="col-12 main__item main__item_login">
-                <button class="main__button button button_standard">Log in</button>
-            </div>
+
             {% endblock form %}
         </form>
     </section>
