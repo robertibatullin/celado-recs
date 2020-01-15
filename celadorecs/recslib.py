@@ -4,7 +4,6 @@
 # # Библиотека общих функций для анализа данных Caterpillar
 
 import os, re
-from shutil import copyfileobj
 from datetime import datetime
 import pickle
 import pandas as pd
@@ -112,8 +111,8 @@ class RecommenderSystem():
         self.model_path = model_path
         version_list = list(filter(lambda s:re.match('\d+\.\d+', s) is not None,
                               os.listdir(self.model_path) ))
-        version_list = filter(lambda s:os.path.isdir(os.path.join(self.model_path,s)),
-                              version_list)
+        version_list = list(filter(lambda s:os.path.isdir(os.path.join(self.model_path,s)),
+                              version_list))
         if version == 'last':
             self.version = sorted(version_list)[-1]
         else:
@@ -412,7 +411,7 @@ class RecommenderSystem():
         pp = pd.DataFrame(index = cnums,
                           columns = model_names,
                           data = data)
-        pp['Customer Number'] = pp.index
+        pp.reset_index(inplace=True)
         pp.drop_duplicates(inplace=True)
         pp = pp.groupby('Customer Number').mean().reset_index() #? группировать по индексу
         pp.to_csv(os.path.join(self.folder, 'probs.csv'), 
