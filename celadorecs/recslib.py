@@ -4,7 +4,6 @@
 # # Библиотека общих функций для рекомендательной системы
 
 #TODO
-#вставлять текущий год и месяц в соотв. поля при предикте
 #разбить на трейн-тест заранее, файлы с именами
 
 import os, re
@@ -28,10 +27,18 @@ def read_list(filename):
     items = filter(lambda s:len(s) > 0 and s[0] != '#', items)
     return list(items)
 
+def printto(*args, out=None):
+    if out == None:
+        print(*args)
+    else:
+        print(*args, file=open(out,'a'))
+
 class RecommenderSystem():
     
     def __read_config(self):
         cfg_path = os.path.join(self.folder, 'config.txt')
+        if not os.path.exists(cfg_path):
+            raise FileNotFoundError('config.txt not found.')
         cfg_lines = read_list(cfg_path)
         vars_to_train_index = cfg_lines.index('VARS TO TRAIN =')
         self.vars_to_train = cfg_lines[vars_to_train_index+1:]
@@ -56,6 +63,7 @@ class RecommenderSystem():
                  current_month = None,
                  min_samples_in_class = 5,
                  test_size = 0.25,
+                 output = None,
                  **kwargs): 
         self.model_path = model_path
         version_list = list(filter(lambda s:re.match('\d+\.\d+', s) is not None,
@@ -66,7 +74,9 @@ class RecommenderSystem():
             self.version = sorted(version_list)[-1]
         else:
             self.version = version
-        print(f'Initializing recommender system (version {self.version}) for {mode} mode')
+        self.output = output
+        printto(f'Initializing recommender system (version {self.version}) for {mode} mode',
+              out=self.output)
         folder = os.path.join(self.model_path,
                               self.version)
         self.folder = folder
@@ -97,13 +107,13 @@ class RecommenderSystem():
                     raise FileNotFoundError(f'Required file {file} not found. Train model first.')
             self.Xcols = read_list(os.path.join(folder, 'model_cols.txt'))
                 
-        print('RecommenderSystem initialized')
+        printto('RecommenderSystem initialized', out=self.output)
                 
         if mode in ('predict','precompute')\
         and os.path.exists(self.clf_filename):
-            print(f'Loading trained model "{self.clf_filename}"')
+            printto(f'Loading trained model "{self.clf_filename}"', out=self.output)
             self.clf = pickle.load(open(self.clf_filename,'rb'))
-            print('Model loaded')
+            printto('Model loaded', out=self.output)
                                     
         if mode == 'train':                
             self.train(**kwargs)
@@ -120,7 +130,8 @@ class RecommenderSystem():
         self.mode = new_mode
                         
     def unite(self, other, version):
-        print('Uniting RecommenderSystem versions {0} and {1}'.format(self.version, other.version))
+        printto('Uniting RecommenderSystem versions {0} and {1}'.format(self.version, 
+                other.version), out=self.output)
         folder = os.path.join(self.model_path,
                       version)
         if not os.path.exists(folder):
@@ -229,8 +240,9 @@ class RecommenderSystem():
         X = data.drop(self.id_vars+[self.target_var], axis=1, errors='ignore')
         X_cols = X.columns
         if use == 'for train' and self.threshold > 1:
-            print('Filtered off classes with less than {} members'.format(self.threshold))
-            print (info('Full', X, target, X_index))
+            printto('Filtered off classes with less than {} members'.format(self.threshold),
+                    out=self.output)
+            printto(info('Full', X, target, X_index), out=self.output)
         if use == 'for train':
             return X, target, X_cols, X_index
         elif use == 'for predict':
@@ -252,11 +264,11 @@ class RecommenderSystem():
             return -int(cov_error(clf, X_, y_, class_names))
                 
         def print_metrics():
-            print('Train set coverage error', output_cov_error(X_train,y_train))
-            print('Test set coverage error', 
+            printto('Train set coverage error', output_cov_error(X_train,y_train), out=self.output)
+            printto('Test set coverage error', 
                   output_cov_error(X_test,
                                    y_test,
-                                   class_names = pd.unique(y_train)))
+                                   class_names = pd.unique(y_train)), out=self.output)
             
         X, y, self.Xcols, Xind = self.__get_Xy()
         
@@ -264,7 +276,7 @@ class RecommenderSystem():
                 f.write('\n'.join(self.Xcols))
         
         if self.test_size > 0:
-            print('Train-test splitting')
+            printto('Train-test splitting', out=self.output)
             if self.threshold == 1:
                 #удваиваем датасет, чтобы в каждом классе было не меньше 2 экз
                 X = pd.concat([X,X])
@@ -279,8 +291,8 @@ class RecommenderSystem():
             X_train, X_test, y_train, y_test,\
             self.train_cnums, self.test_cnums = X, X, y, y, Xind, Xind
             
-        print (info('Train', X_train, y_train, self.train_cnums))
-        print (info('Test', X_test, y_test, self.test_cnums))
+        printto (info('Train', X_train, y_train, self.train_cnums), out=self.output)
+        printto (info('Test', X_test, y_test, self.test_cnums), out=self.output)
 
         X_train = sparse.csr_matrix(X_train)
         X_test = sparse.csr_matrix(X_test)
@@ -291,24 +303,24 @@ class RecommenderSystem():
                                          n_estimators=40,
                                          random_state=0,
                                          **kwargs)
-            print('Training random forest')
+            printto('Training random forest', out=self.output)
         elif self.clf_name == 'log':
             clf = make_pipeline( StandardScaler(with_mean=False), 
                                 LogisticRegression(multi_class='multinomial',
                                                    solver='saga',
                                                    C=0.002) )
-            print('Training logistic regression')
+            printto('Training logistic regression', out=self.output)
         elif self.clf_name == 'kn':
             clf = make_pipeline( StandardScaler(with_mean=False), 
                                 KNeighborsClassifier(n_neighbors=50,
                                         **kwargs) )
-            print('Training k-neighbors classifier')
+            printto('Training k-neighbors classifier', out=self.output)
         elif self.clf_name == 'svm':
             clf = make_pipeline( StandardScaler(with_mean=False), 
                                 SVC(kernel='rbf',
                                     probability=True,
                                     **kwargs) )
-            print('Training SVC')
+            printto('Training SVC', out=self.output)
         if self.mode == 'explore':
             if self.clf_name == 'log':
                 param_grid = {'logisticregression__penalty':['l2'],
@@ -330,14 +342,14 @@ class RecommenderSystem():
             grid.fit(X_train, y_train)
             clf = grid.best_estimator_
             print_metrics()
-            print(grid.best_params_)
+            printto(grid.best_params_, out=self.output)
         elif self.mode == 'train':
             clf = clf.fit(X_train,y_train)
             print_metrics()
             self.clf = clf            
-            print('Saving model')
+            printto('Saving model', out=self.output)
             pickle.dump(clf, open(self.clf_filename, 'wb'))
-            print('Model saved to '+self.clf_filename)
+            printto('Model saved to '+self.clf_filename, out=self.output)
 
     def predict(self, customer_df, num_top = None):
         target_names = read_list(os.path.join(self.folder, 'target_names.csv'))
@@ -369,18 +381,19 @@ class RecommenderSystem():
             return results
         
     def precompute(self):        
-        print('Precomputing probabilities')
+        printto('Precomputing probabilities', out=self.output)
         pp = self.predict(customer_df = None)
         pp.to_csv(os.path.join(self.folder, 'probs.csv'), 
                   sep=';',
                   index=False)
-        print('Precomputed probabilities saved to {}/probs.csv.'.format(self.folder))
+        printto('Precomputed probabilities saved to {}/probs.csv.'.format(self.folder),
+                out=self.output)
 
     def get_top_from_table(self, input_id, #customer name or model name
                            find, #customers|offers
                            num_top,
                            show_really_sold = False):
-        print('Getting top from precomputed table')
+        printto('Getting top from precomputed table', out=self.output)
         probs = pd.read_csv(os.path.join(self.folder, 'probs.csv'),
                          sep=';', index_col=0)
         try:
@@ -445,7 +458,7 @@ class RecommenderSystem():
         return real_sells
                 
     def recall_at_k(self, Ks, n_samples=None, verbose=False):
-        print('Calculating recall scores')
+        printto('Calculating recall scores', out=self.output)
         probs = pd.read_csv(os.path.join(self.folder, 'probs.csv'),
                             sep=';', index_col = 0) 
         try:
@@ -456,10 +469,10 @@ class RecommenderSystem():
                                      size=test_size, 
                                      replace=False)
         if n_samples is None:
-            print('Testing all {} samples from test set'.format(len(test_cnums)))
+            printto('Testing all {} samples from test set'.format(len(test_cnums)), out=self.output)
             cnums = test_cnums
         else:
-            print('Testing {} random samples from test set'.format(n_samples))
+            printto('Testing {} random samples from test set'.format(n_samples), out=self.output)
             cnums = np.random.choice(test_cnums, 
                                      size=n_samples, 
                                      replace=False)
@@ -481,27 +494,27 @@ class RecommenderSystem():
                 n_pos = len(real_sells) - n_neg
             maxtop = probs.loc[cnum].sort_values(ascending=False).head(max_top_size)
             if verbose:
-                print(cnum) 
-                print('RELEVANT: ', ', '.join(real_sells))
+                printto(cnum, out=self.output) 
+                printto('RELEVANT: ', ', '.join(real_sells), out=self.output)
             for top_size in top_sizes:
                 top = maxtop.head(top_size)
                 top = list(top.index)
                 if verbose:
-                    print(f'RECOMMENDED TOP {max_top_size}:', ', '.join(top))
+                    printto(f'RECOMMENDED TOP {max_top_size}:', ', '.join(top), out=self.output)
                 n_pos_matches = len([s for s in top if s in real_sells and s!='nothing'])
                 n_neg_matches = 1 if 'nothing' in top and 'nothing' in real_sells else 0
                 if n_neg > 0:
                     neg_recall = n_neg_matches/n_neg
                     recalls[top_size]['neg'].append(neg_recall)
                     if verbose:
-                        print(f'NEG RECALL AT TOP {max_top_size}:',neg_recall)
+                        printto(f'NEG RECALL AT TOP {max_top_size}:',neg_recall, out=self.output)
                 if n_pos > 0: 
                     pos_recall = n_pos_matches/n_pos
                     recalls[top_size]['pos'].append(pos_recall)
                     if verbose:
-                        print(f'POS RECALL AT TOP {max_top_size}:',pos_recall)
+                        printto(f'POS RECALL AT TOP {max_top_size}:',pos_recall, out=self.output)
                 if verbose:
-                    print()
+                    printto('', out=self.output)
         means = {}    
         for top_size in top_sizes:
             pos = recalls[top_size]['pos']
@@ -509,9 +522,9 @@ class RecommenderSystem():
             pos = 0 if len(pos) == 0 else np.mean(pos)
             neg = 0 if len(neg) == 0 else np.mean(neg)
             means[top_size] = {'pos':pos, 'neg':neg}
-            print('TOP SIZE:',top_size)
-            print('Recall for positive predictions:',pos)
-            print('Recall for negative predictions:',neg)
+            printto('TOP SIZE:',top_size, out=self.output)
+            printto('Recall for positive predictions:',pos, out=self.output)
+            printto('Recall for negative predictions:',neg, out=self.output)
         return means
     
     def write_and_show_results(self, results, lang='en'):
