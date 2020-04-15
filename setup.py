@@ -1,7 +1,7 @@
 from setuptools import setup
 
 setup(name='celadorecs',
-      version='1.5',
+      version='1.6',
       description='Celado Recommender System',
       url='https://github.com/robertibatullin/celado-recs',
       author='CeladoAI',

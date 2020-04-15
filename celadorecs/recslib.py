@@ -99,12 +99,19 @@ class RecommenderSystem():
         self.mode = mode
         self.threshold = min_samples_in_class
         self.test_size = test_size
-
-        if not self.mode in ('train','precompute','create'):
+        
+        files_required = []
+        if mode == 'precompute':
+            files_required = ['model_cols.txt', self.clf_name+'.pkl']
+        elif mode == 'predict':
             files_required = ['probs.csv', 'model_cols.txt', self.clf_name+'.pkl']
-            for file in files_required:
-                if not os.path.exists(os.path.join(folder, file)):
-                    raise FileNotFoundError(f'Required file {file} not found. Train model first.')
+        elif mode in ('read','explore'):
+            files_required = ['probs.csv']
+
+        if not os.path.exists(os.path.join(folder, file)):
+            raise FileNotFoundError(f'Required file {file} not found. Train model first.')
+        
+        if 'model_cols.txt' in files_required:
             self.Xcols = read_list(os.path.join(folder, 'model_cols.txt'))
                 
         printto('RecommenderSystem initialized', out=self.output)
@@ -117,7 +124,7 @@ class RecommenderSystem():
                                     
         if mode == 'train':                
             self.train(**kwargs)
-            
+                       
         if mode in ('train', 'precompute'):
             self.precompute()
             
@@ -188,20 +195,25 @@ class RecommenderSystem():
         data_ = data.fillna(0)
         ids = self.id_vars + [self.target_var]
         ids_ = [id_ for id_ in ids if id_ in data.columns]
-        to_sum = [col for col in data.columns if 'Existing:' in col]
-        to_mean = [col for col in data.columns if 'Customer:' in col or 'Offer:' in col]
-        result_mean = data_.groupby(ids_)[to_mean].mean()
-        result_sum = data_.groupby(ids_)[to_sum].sum()
-        del data_
+        to_sum = data_.drop(ids_, axis=1).filter(regex='^Existing: ')
+        to_sum = to_sum.join(data_[ids_])
+        to_mean = data.drop(ids_, axis=1).filter(regex='(^Customer: )|(^Offer: )')
+        to_mean = to_mean.join(data_[ids_])
+        result_mean = to_mean.groupby(ids_).mean()
+#        print('groupby mean ready',result_mean.shape)
+        result_sum = to_sum.groupby(ids_).sum()
+#        print('groupby sum ready',result_sum.shape)
+        del data_, to_mean, to_sum
         result = result_mean.join(result_sum)
+        del result_mean, result_sum
         result.reset_index(inplace=True)
         result.sort_index(axis=1, inplace=True)
         return result
     
     def __filter_small_classes(self, data):
         target_vals = pd.value_counts(data[self.target_var])
-        rare_target_vals = target_vals[target_vals < self.threshold].index
-        filtered = data[~data[self.target_var].isin(rare_target_vals)]
+        popular_target_vals = target_vals[target_vals >= self.threshold].index
+        filtered = data[data[self.target_var].isin(popular_target_vals)]
         return filtered
         
     def __get_Xy(self,
@@ -212,23 +224,32 @@ class RecommenderSystem():
             customers = pd.read_csv(os.path.join(self.folder, 'customers.csv'))
         else:
             customers = customer_df
+#        print('customers',customers.shape)
         offers = pd.read_csv(os.path.join(self.folder, 'offers.csv'))
+#        print('offers',offers.shape)
         contracts = pd.read_csv(os.path.join(self.folder, 'contracts.csv'))
+#        print('contracts',contracts.shape)
         how = 'left' if use == 'for train' else 'right'            
         off_contr = contracts.merge(offers, on=self.offer_id, how=how)
         data = off_contr.merge(customers, on=self.customer_id, how=how)
+#        print('data',data.shape)
         del off_contr, contracts, offers, customers
         if use == 'for train':
             data.dropna(inplace=True)
+#        print('data dropna',data.shape)
         data.drop_duplicates().reset_index(drop=True, inplace=True)
+#        print('data drop dupl',data.shape)
         target = data[self.target_var]
         ids = data[self.id_vars]
         data = data.reindex(self.vars_to_train, axis=1)
         data = self.__normalize_encode(data.drop(self.target_var, axis=1))
         data = data.join(target).join(ids)
+#        print('data encoded',data.shape)
         data = self.__group_by_id(data)
+#        print('data grouped',data.shape)
         if use == 'for train' and self.threshold > 1:
-            data = self.__filter_small_classes(data)            
+            data = self.__filter_small_classes(data)  
+#            print('data filtered',data.shape)
         target = data[self.target_var]
         ids = data[self.id_vars]
         if use == 'for train':
@@ -246,7 +267,7 @@ class RecommenderSystem():
         if use == 'for train':
             return X, target, X_cols, X_index
         elif use == 'for predict':
-            return X, X_cols, X_index
+            return X.fillna(0), X_cols, X_index
     
     def train(self, **kwargs):
         
@@ -296,6 +317,13 @@ class RecommenderSystem():
 
         X_train = sparse.csr_matrix(X_train)
         X_test = sparse.csr_matrix(X_test)
+        
+#        X = pd.DataFrame(X, columns=self.Xcols)
+#        lx = len(X)
+#        print(lx)
+#        for c in X.columns:
+#            if lx != len(X[c].dropna()):
+#                print(c, len(X[c].dropna()))
         del X, y
         
         if self.clf_name == 'rf':
@@ -383,47 +411,68 @@ class RecommenderSystem():
     def precompute(self):        
         printto('Precomputing probabilities', out=self.output)
         pp = self.predict(customer_df = None)
+        pp.set_index(self.customer_id, inplace=True)
+        pp = pp.unstack().reset_index()
+        pp.columns = [self.offer_id,
+                      self.customer_id,
+                      'PropensityToBuy']
+        pp[['ProductId','NewUsed']] = pp[self.offer_id].str.split(':',expand=True)
+        pp.drop(self.offer_id,axis=1,inplace=True)
+        pp = pp[pp['PropensityToBuy']>0]
+        pp.sort_index(axis=1, inplace=True)
         pp.to_csv(os.path.join(self.folder, 'probs.csv'), 
                   sep=';',
                   index=False)
         printto('Precomputed probabilities saved to {}/probs.csv.'.format(self.folder),
                 out=self.output)
 
-    def get_top_from_table(self, input_id, #customer name or model name
+    def get_top_from_table(self, input_id, #customer or model id
                            find, #customers|offers
                            num_top,
                            show_really_sold = False):
         printto('Getting top from precomputed table', out=self.output)
         probs = pd.read_csv(os.path.join(self.folder, 'probs.csv'),
-                         sep=';', index_col=0)
-        try:
-            if find == 'offers':
-                series = probs.loc[input_id].copy()
-            elif find == 'customers':
-                series = probs[input_id].copy()
-        except KeyError or IndexError:
-            return None
-        series.sort_values(ascending=(num_top < 0), inplace=True)
-        series = series.head(np.abs(num_top))
-        df = pd.DataFrame(series).reset_index()
+                         sep=';')
         if find == 'offers':
-            df.rename(columns = {'index':'Offer',
-                                 df.columns[1]:'Propensity to buy'}, inplace=True)
-            if show_really_sold:
-                df['Really sold?'] = df['Offer'].apply(lambda offer:self.is_really_sold(input_id, offer))
+            source_id, target_id = 'CompanyId', 'ProductId'
         elif find == 'customers':
-            df.rename(columns = {df.columns[0]:'Customer',
-                                 df.columns[1]:'Propensity to buy'}, inplace=True)
-            if show_really_sold:
-                df['Really sold?'] = df['Customer'].apply(
-                        lambda customer:self.is_really_sold(customer, input_id))                
-        return df
+            source_id, target_id = 'ProductId', 'CompanyId'
+        frg = probs[probs[source_id]==input_id].copy()
+        del probs
+        frg.sort_values('PropensityToBuy', ascending=False, inplace=True)
+        if input_id == 'nothing':
+            cols = [target_id, 'PropensityToBuy']
+        else:
+            cols = [target_id, 'NewUsed', 'PropensityToBuy']
+        frg = frg[cols].head(num_top)
+        if show_really_sold:
+            if find == 'offers':
+                frg['Really sold?'] = frg[target_id].apply(
+                        lambda offer:self.is_really_sold(input_id, offer))
+            elif find == 'customers':
+                frg['Really sold?'] = frg[target_id].apply(
+                        lambda customer:self.is_really_sold(customer, input_id))
+        return frg
 
     def is_really_sold(self, customer, offer):
-        df = pd.read_csv(os.path.join(self.folder,'contracts.csv'))
-        rs = df[(df[self.customer_id]==customer) & (df[self.target_var]==offer)]
-        res = 'yes' if len(rs)>0 else 'no'
-        return res
+        ctr = pd.read_csv(os.path.join(self.folder,'contracts.csv'))
+        customer_sells = ctr[[self.customer_id, 
+                              self.offer_id, 
+                              self.target_var]].copy()
+        del ctr
+        customer_sells = customer_sells[
+                customer_sells[self.customer_id]==customer]
+        if len(customer_sells) == 0:
+            if offer == 'nothing':
+                return 'yes'
+            else:
+                return 'no'
+        split = customer_sells[self.target_var].str.split(':', expand=True)
+        successes = customer_sells[split[0]==offer]
+        if len(successes) > 0:
+            return 'yes'
+        else:
+            return 'no'
 
     def retrain(self, source_folder):
         #в source_folder должны быть записаны готовые файлы csv
