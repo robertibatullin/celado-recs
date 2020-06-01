@@ -11,11 +11,14 @@ from datetime import datetime
 import pickle
 import pandas as pd
 import numpy as np
-from scipy import sparse
+#from scipy import sparse
 import warnings
 warnings.filterwarnings('ignore')
 
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.linear_model import LinearRegression, LogisticRegression
+from sklearn.svm import SVC, SVR
+from sklearn.ensemble import RandomForestClassifier,RandomForestRegressor,GradientBoostingClassifier,GradientBoostingRegressor
+
 from sklearn.model_selection import train_test_split, GridSearchCV
 from sklearn.metrics import coverage_error
 from sklearn.preprocessing import StandardScaler
@@ -52,8 +55,22 @@ class RecommenderSystem():
         self.target_var = dct['TARGET']
         self.contract_year = dct['CONTRACT YEAR']
         self.contract_year_epoch = int(dct['CONTRACT YEAR EPOCH'])
-        self.contract_month = dct['CONTRACT MONTH']
-        self.clf_name = dct['CLASSIFIER']
+        try:
+            self.contract_month = dct['CONTRACT MONTH']
+        except KeyError:
+            self.contract_month = None
+        try:
+            self.contract_week = dct['CONTRACT WEEK']
+        except KeyError:
+            self.contract_week = None
+        if 'CLASSIFIER' in dct:
+            self.model_name = dct['CLASSIFIER']
+            self.model_type = 'classifier'
+            self.probs_colname = 'PropensityToBuy'
+        elif 'REGRESSOR' in dct:
+            self.model_name = dct['REGRESSOR']
+            self.model_type = 'regressor'
+            self.probs_colname = self.target_var
     
     def __init__(self,
                  model_path = 'model',
@@ -61,6 +78,7 @@ class RecommenderSystem():
                  mode = 'read',#explore|train|predict|precompute|read (from precomputed predictions) 
                  current_year = None,
                  current_month = None,
+                 current_week = None,
                  min_samples_in_class = 5,
                  test_size = 0.25,
                  output = None,
@@ -84,6 +102,7 @@ class RecommenderSystem():
         now = datetime.now()
         self.current_year = now.year if current_year == None else current_year
         self.current_month = now.month if current_month == None else current_month
+        self.current_week = int(now.strftime('%W')) if current_week == None else current_week
         self.current_year = self.current_year - self.contract_year_epoch
         
         files_required = ['customers.csv',
@@ -94,17 +113,17 @@ class RecommenderSystem():
             if not os.path.exists(os.path.join(folder, file)):
                 raise FileNotFoundError(f'Required file {file} not found. Preprocess data first.')
 
-        self.clf_filename = os.path.join(self.folder, 
-                                         self.clf_name+'.pkl')
+        self.model_filename = os.path.join(self.folder, 
+                                         self.model_name+'.pkl')
         self.mode = mode
         self.threshold = min_samples_in_class
         self.test_size = test_size
         
         files_required = []
         if mode == 'precompute':
-            files_required = ['model_cols.txt', self.clf_name+'.pkl']
+            files_required = ['model_cols.txt', self.model_name+'.pkl']
         elif mode == 'predict':
-            files_required = ['probs.csv', 'model_cols.txt', self.clf_name+'.pkl']
+            files_required = ['probs.csv', 'model_cols.txt', self.model_name+'.pkl']
         elif mode in ('read','explore'):
             files_required = ['probs.csv']
 
@@ -115,17 +134,17 @@ class RecommenderSystem():
             self.Xcols = read_list(os.path.join(folder, 'model_cols.txt'))
                 
         printto('RecommenderSystem initialized', out=self.output)
-                
+                        
         if mode in ('predict','precompute')\
-        and os.path.exists(self.clf_filename):
-            printto(f'Loading trained model "{self.clf_filename}"', out=self.output)
-            self.clf = pickle.load(open(self.clf_filename,'rb'))
+        and os.path.exists(self.model_filename):
+            printto(f'Loading trained model "{self.model_filename}"', out=self.output)
+            self.model = pickle.load(open(self.model_filename,'rb'))
             printto('Model loaded', out=self.output)
                                     
         if mode == 'train':                
             self.train(**kwargs)
                        
-        if mode in ('train', 'precompute'):
+        if mode == 'precompute':
             self.precompute()
             
         if mode == 'explore':
@@ -176,7 +195,7 @@ class RecommenderSystem():
 #        except KeyError:
 #            pass
         cat_cols = cat_cols.astype('category')    
-        one_hot = pd.get_dummies(cat_cols)
+        one_hot = pd.get_dummies(cat_cols, drop_first=True)
         to_drop = list(filter(lambda s:s[-3:]=='_no' \
                               or s[-4:]=='_0.0' \
                               or s[-2:]=='_0',
@@ -195,9 +214,9 @@ class RecommenderSystem():
         data_ = data.fillna(0)
         ids = self.id_vars + [self.target_var]
         ids_ = [id_ for id_ in ids if id_ in data.columns]
-        to_sum = data_.drop(ids_, axis=1).filter(regex='^Existing: ')
+        to_sum = data_.drop(ids_, axis=1).filter(regex='^Existing:')
         to_sum = to_sum.join(data_[ids_])
-        to_mean = data.drop(ids_, axis=1).filter(regex='(^Customer: )|(^Offer: )')
+        to_mean = data.drop(ids_, axis=1).filter(regex='(^Customer:)|(^Offer:)|(^Contract:)')
         to_mean = to_mean.join(data_[ids_])
         result_mean = to_mean.groupby(ids_).mean()
 #        print('groupby mean ready',result_mean.shape)
@@ -247,12 +266,12 @@ class RecommenderSystem():
 #        print('data encoded',data.shape)
         data = self.__group_by_id(data)
 #        print('data grouped',data.shape)
-        if use == 'for train' and self.threshold > 1:
+        if use == 'for train' and self.model_type == 'classifier' and self.threshold > 1:
             data = self.__filter_small_classes(data)  
 #            print('data filtered',data.shape)
         target = data[self.target_var]
         ids = data[self.id_vars]
-        if use == 'for train':
+        if use == 'for train' and self.model_type == 'classifier':
             target_encoded, target_unique = pd.factorize(target)
             with open(os.path.join(self.folder, 'target_names.csv'),'w') as f:
                 f.write('\n'.join(target_unique))
@@ -260,10 +279,10 @@ class RecommenderSystem():
         X_index = data[self.customer_id]
         X = data.drop(self.id_vars+[self.target_var], axis=1, errors='ignore')
         X_cols = X.columns
-        if use == 'for train' and self.threshold > 1:
+        if use == 'for train' and self.model_type == 'classifier' and self.threshold > 1:
             printto('Filtered off classes with less than {} members'.format(self.threshold),
                     out=self.output)
-            printto(info('Full', X, target, X_index), out=self.output)
+            printto(self.info('Full', X, target, X_index), out=self.output)
         if use == 'for train':
             return X, target, X_cols, X_index
         elif use == 'for predict':
@@ -282,7 +301,7 @@ class RecommenderSystem():
             return -coverage_error(y_bin.values, pred_proba)
         
         def output_cov_error(X_, y_, class_names = None):
-            return -int(cov_error(clf, X_, y_, class_names))
+            return -int(cov_error(model, X_, y_, class_names))
                 
         def print_metrics():
             printto('Train set coverage error', output_cov_error(X_train,y_train), out=self.output)
@@ -292,7 +311,6 @@ class RecommenderSystem():
                                    class_names = pd.unique(y_train)), out=self.output)
             
         X, y, self.Xcols, Xind = self.__get_Xy()
-        
         with open(os.path.join(self.folder, 'model_cols.txt'), 'w') as f:
                 f.write('\n'.join(self.Xcols))
         
@@ -303,20 +321,24 @@ class RecommenderSystem():
                 X = pd.concat([X,X])
                 y = pd.concat([y,y])
                 Xind = pd.concat([Xind, Xind])
+            if self.model_type == 'classifier':
+                stratify = y
+            elif self.model_type == 'regressor':
+                stratify = None
             X_train, X_test, y_train, y_test,\
             self.train_cnums, self.test_cnums = train_test_split(X, y,
                                                                  Xind,
                                                                  test_size = self.test_size,
-                                                                 stratify = y)
+                                                                 stratify = stratify)
         else:
             X_train, X_test, y_train, y_test,\
             self.train_cnums, self.test_cnums = X, X, y, y, Xind, Xind
             
-        printto (info('Train', X_train, y_train, self.train_cnums), out=self.output)
-        printto (info('Test', X_test, y_test, self.test_cnums), out=self.output)
-
-        X_train = sparse.csr_matrix(X_train)
-        X_test = sparse.csr_matrix(X_test)
+        printto (self.info('Train', X_train, y_train, self.train_cnums), out=self.output)
+        printto (self.info('Test', X_test, y_test, self.test_cnums), out=self.output)
+        
+#        X_train = sparse.csr_matrix(X_train)
+#        X_test = sparse.csr_matrix(X_test)
         
 #        X = pd.DataFrame(X, columns=self.Xcols)
 #        lx = len(X)
@@ -326,38 +348,56 @@ class RecommenderSystem():
 #                print(c, len(X[c].dropna()))
         del X, y
         
-        if self.clf_name == 'rf':
-            clf = RandomForestClassifier(class_weight='balanced',
-                                         n_estimators=40,
-                                         random_state=0,
-                                         **kwargs)
-            printto('Training random forest', out=self.output)
-        elif self.clf_name == 'log':
-            clf = make_pipeline( StandardScaler(with_mean=False), 
-                                LogisticRegression(multi_class='multinomial',
-                                                   solver='saga',
-                                                   C=0.002) )
-            printto('Training logistic regression', out=self.output)
-        elif self.clf_name == 'kn':
-            clf = make_pipeline( StandardScaler(with_mean=False), 
-                                KNeighborsClassifier(n_neighbors=50,
+        if self.model_name == 'rf':
+            if self.model_type == 'classifier':
+                model = RandomForestClassifier(class_weight='balanced',
+                                             random_state=0,
+                                             **kwargs)
+            elif self.model_type == 'regressor':
+                model = RandomForestRegressor(random_state=0,
+                                             **kwargs)
+            printto(f'Training random forest {kwargs}', out=self.output)
+        elif self.model_name == 'gb':
+            if self.model_type == 'classifier':
+                model = GradientBoostingClassifier(random_state=0,
+                                             **kwargs)
+            elif self.model_type == 'regressor':
+                model = GradientBoostingRegressor(random_state=0,
+                                             **kwargs)
+            printto(f'Training gradient boosting {kwargs}', out=self.output)
+        elif self.model_name == 'lr':
+            if self.model_type == 'classifier':
+                model = make_pipeline( StandardScaler(with_mean=False), 
+                                    LogisticRegression(multi_class='multinomial',
+                                                       solver='saga',
+                                                       class_weight = 'balanced',
+                                                       C=0.002) )
+                printto('Training logistic regression', out=self.output)
+            elif self.model_type == 'regressor':
+                model = make_pipeline( StandardScaler(with_mean=False), 
+                                    LinearRegression() )
+                printto('Training linear regression', out=self.output)
+        elif self.model_name == 'svm':
+            if self.model_type == 'classifier':
+                model = make_pipeline( StandardScaler(with_mean=False), 
+                                    SVC(kernel='rbf',
+                                        probability=True,
                                         **kwargs) )
-            printto('Training k-neighbors classifier', out=self.output)
-        elif self.clf_name == 'svm':
-            clf = make_pipeline( StandardScaler(with_mean=False), 
-                                SVC(kernel='rbf',
-                                    probability=True,
-                                    **kwargs) )
-            printto('Training SVC', out=self.output)
+                printto('Training SVC', out=self.output)
+            if self.model_type == 'regressor':
+                model = make_pipeline( StandardScaler(with_mean=False), 
+                                    SVR(kernel='rbf',
+                                        **kwargs) )
+                printto('Training SVR', out=self.output)
         if self.mode == 'explore':
-            if self.clf_name == 'log':
+            if self.model_name == 'log':
                 param_grid = {'logisticregression__penalty':['l2'],
                               'logisticregression__C':[0.002, 0.005, 0.008]}
-            elif self.clf_name == 'rf':
+            elif self.model_name == 'rf':
                 param_grid = {'n_estimators':[10, 20, 40, 100],
                               'criterion':['gini','entropy']
                               }
-            grid = GridSearchCV(clf, 
+            grid = GridSearchCV(model, 
                                 scoring = cov_error,
                                 verbose = 0,
                                 param_grid = param_grid)
@@ -368,28 +408,51 @@ class RecommenderSystem():
 #            print('Test set num classes',len(pd.unique(y_test)))
 #            clf = clf.fit(X_train,y_train)
             grid.fit(X_train, y_train)
-            clf = grid.best_estimator_
+            model = grid.best_estimator_
             print_metrics()
             printto(grid.best_params_, out=self.output)
         elif self.mode == 'train':
-            clf = clf.fit(X_train,y_train)
-            print_metrics()
-            self.clf = clf            
+            model = model.fit(X_train,y_train)
+            if self.model_type == 'classifier':
+                print_metrics()
+            elif self.model_type == 'regressor':
+                printto('R^2:',model.score(X_test,y_test))
+            self.model = model            
             printto('Saving model', out=self.output)
-            pickle.dump(clf, open(self.clf_filename, 'wb'))
-            printto('Model saved to '+self.clf_filename, out=self.output)
+            pickle.dump(model, open(self.model_filename, 'wb'))
+            printto('Model saved to '+self.model_filename, out=self.output)
 
-    def predict(self, customer_df, num_top = None):
-        target_names = read_list(os.path.join(self.folder, 'target_names.csv'))
+    def predict(self, customer_df, 
+                num_top = None,
+                year = None,
+                month = None,
+                week = None):
+        if year is None:
+            year = self.current_year
+        if month is None:
+            month = self.current_month
+        if week is None:
+            week = self.current_week
         X, _, customer_nums = self.__get_Xy(use='for predict', 
                                           customer_df = customer_df)
         X = X.reindex(self.Xcols, axis=1, fill_value=0)
-        X[self.contract_month] = self.current_month
-        X[self.contract_year] = self.current_year
-        data = self.clf.predict_proba(X)
-        pp = pd.DataFrame(index = customer_nums,
-                          columns = target_names,
-                          data = data)
+        if self.contract_year in self.Xcols:
+            X[self.contract_year] = year
+        if self.contract_month in self.Xcols:
+            X[self.contract_month] = month
+        if self.contract_week in self.Xcols:
+            X[self.contract_week] = week
+        if self.model_type == 'classifier':
+            target_names = read_list(os.path.join(self.folder, 'target_names.csv'))
+            data = self.model.predict_proba(X)
+            pp = pd.DataFrame(index = customer_nums,
+                              columns = target_names,
+                              data = data)
+        elif self.model_type == 'regressor':
+            data = self.model.predict(X)
+            pp = pd.DataFrame(index = customer_nums,
+                              columns = [self.target_var],
+                              data = data)
         pp.reset_index(inplace=True)
         pp.drop_duplicates(inplace=True)
         pp = pp.groupby(self.customer_id).mean().reset_index()
@@ -404,75 +467,80 @@ class RecommenderSystem():
                 result.sort_values(ascending = (num_top<0), inplace=True)
                 result = result.head(np.abs(num_top))
                 result = pd.DataFrame({header:result.index,
-                        'Propensity to buy':result})
+                        self.probs_colname:result})
                 results.append(result)
             return results
         
+    def predict_for_known_customers(self, 
+                                    customer_ids=None, 
+                                    num_top = None,
+                                    year = None,
+                                    month = None,
+                                    week = None):
+        customer_df = pd.read_csv(os.path.join(self.folder, 'customers.csv'))
+        if customer_ids is not None:
+            customer_df = customer_df[customer_df[self.customer_id].isin(customer_ids)]
+        if len(customer_df) == 0:
+            return None
+        results = self.predict(customer_df,num_top,year,month,week)
+        return results
+        
     def precompute(self):        
-        printto('Precomputing probabilities', out=self.output)
+        printto('Precomputing', out=self.output)
         pp = self.predict(customer_df = None)
         pp.set_index(self.customer_id, inplace=True)
         pp = pp.unstack().reset_index()
         pp.columns = [self.offer_id,
                       self.customer_id,
-                      'PropensityToBuy']
-        pp[['ProductId','NewUsed']] = pp[self.offer_id].str.split(':',expand=True)
-        pp.drop(self.offer_id,axis=1,inplace=True)
-        pp = pp[pp['PropensityToBuy']>0]
+                      self.probs_colname]
+        try:
+            pp[['Product','NewUsed']] = pp[self.offer_id].str.split(':',expand=True)
+            pp.drop(self.offer_id,axis=1,inplace=True)
+        except ValueError:
+            pass
+        pp = pp[pp[self.probs_colname]>0]
         pp.sort_index(axis=1, inplace=True)
         pp.to_csv(os.path.join(self.folder, 'probs.csv'), 
                   sep=';',
                   index=False)
-        printto('Precomputed probabilities saved to {}/probs.csv.'.format(self.folder),
+        printto('Precomputed values saved to {}/probs.csv.'.format(self.folder),
                 out=self.output)
 
-    def get_top_from_table(self, input_id, #customer or model id
+    def get_top_from_table(self, input_id, #customer name or model name
                            find, #customers|offers
                            num_top,
                            show_really_sold = False):
         printto('Getting top from precomputed table', out=self.output)
         probs = pd.read_csv(os.path.join(self.folder, 'probs.csv'),
-                         sep=';')
-        if find == 'offers':
-            source_id, target_id = 'CompanyId', 'ProductId'
-        elif find == 'customers':
-            source_id, target_id = 'ProductId', 'CompanyId'
-        frg = probs[probs[source_id]==input_id].copy()
-        del probs
-        frg.sort_values('PropensityToBuy', ascending=False, inplace=True)
-        if input_id == 'nothing':
-            cols = [target_id, 'PropensityToBuy']
-        else:
-            cols = [target_id, 'NewUsed', 'PropensityToBuy']
-        frg = frg[cols].head(num_top)
-        if show_really_sold:
+                         sep=';', index_col=0)
+        try:
             if find == 'offers':
-                frg['Really sold?'] = frg[target_id].apply(
-                        lambda offer:self.is_really_sold(input_id, offer))
+                series = probs.loc[input_id].copy()
             elif find == 'customers':
-                frg['Really sold?'] = frg[target_id].apply(
-                        lambda customer:self.is_really_sold(customer, input_id))
-        return frg
+                series = probs[input_id].copy()
+        except KeyError or IndexError:
+            return None
+        series.sort_values(ascending=(num_top < 0), inplace=True)
+        series = series.head(np.abs(num_top))
+        df = pd.DataFrame(series).reset_index()
+        if find == 'offers':
+            df.rename(columns = {'index':'Offer',
+                                 df.columns[1]:'Propensity to buy'}, inplace=True)
+            if show_really_sold:
+                df['Really sold?'] = df['Offer'].apply(lambda offer:self.is_really_sold(input_id, offer))
+        elif find == 'customers':
+            df.rename(columns = {df.columns[0]:'Customer',
+                                 df.columns[1]:'Propensity to buy'}, inplace=True)
+            if show_really_sold:
+                df['Really sold?'] = df['Customer'].apply(
+                        lambda customer:self.is_really_sold(customer, input_id))                
+        return df
 
     def is_really_sold(self, customer, offer):
-        ctr = pd.read_csv(os.path.join(self.folder,'contracts.csv'))
-        customer_sells = ctr[[self.customer_id, 
-                              self.offer_id, 
-                              self.target_var]].copy()
-        del ctr
-        customer_sells = customer_sells[
-                customer_sells[self.customer_id]==customer]
-        if len(customer_sells) == 0:
-            if offer == 'nothing':
-                return 'yes'
-            else:
-                return 'no'
-        split = customer_sells[self.target_var].str.split(':', expand=True)
-        successes = customer_sells[split[0]==offer]
-        if len(successes) > 0:
-            return 'yes'
-        else:
-            return 'no'
+        df = pd.read_csv(os.path.join(self.folder,'contracts.csv'))
+        rs = df[(df[self.customer_id]==customer) & (df[self.target_var]==offer)]
+        res = 'yes' if len(rs)>0 else 'no'
+        return res
 
     def retrain(self, source_folder):
         #в source_folder должны быть записаны готовые файлы csv
@@ -509,12 +577,12 @@ class RecommenderSystem():
     def recall_at_k(self, Ks, n_samples=None, verbose=False):
         printto('Calculating recall scores', out=self.output)
         probs = pd.read_csv(os.path.join(self.folder, 'probs.csv'),
-                            sep=';', index_col = 0) 
+                            sep=';') 
         try:
             test_cnums = self.test_cnums
         except AttributeError:
             test_size = len(probs) if self.test_size == 0 else int(self.test_size*len(probs))
-            test_cnums = np.random.choice(probs.index, 
+            test_cnums = np.random.choice(probs[self.customer_id], 
                                      size=test_size, 
                                      replace=False)
         if n_samples is None:
@@ -541,13 +609,15 @@ class RecommenderSystem():
                 real_sells = set(real_sells)
                 n_neg = 1 if 'nothing' in real_sells else 0
                 n_pos = len(real_sells) - n_neg
-            maxtop = probs.loc[cnum].sort_values(ascending=False).head(max_top_size)
+            maxtop = probs[probs[self.customer_id]==cnum]\
+            .sort_values(ascending=False, by='PropensityToBuy')\
+            .head(max_top_size)
             if verbose:
-                printto(cnum, out=self.output) 
+                printto('CUSTOMER: ',cnum, out=self.output) 
                 printto('RELEVANT: ', ', '.join(real_sells), out=self.output)
             for top_size in top_sizes:
                 top = maxtop.head(top_size)
-                top = list(top.index)
+                top = list(top[self.offer_id])
                 if verbose:
                     printto(f'RECOMMENDED TOP {max_top_size}:', ', '.join(top), out=self.output)
                 n_pos_matches = len([s for s in top if s in real_sells and s!='nothing'])
@@ -592,6 +662,16 @@ class RecommenderSystem():
             elif lang == 'en':
                 footers.append( f'Results saved to the file <a href={url}>{filename}</a>' )
         return tables, footers    
+
+    def info(self, name, X, y, Xind):
+        s = '{} dataset\n'.format(name)
+        s += '\t{} samples\n'.format(X.shape[0])
+        s += '\t{} features\n'.format(X.shape[1])
+        if self.model_type == 'classifier':
+            s += '\t{} classes\n'.format(len(pd.unique(y)))
+        s += '\t{} unique sample IDs'.format(len(pd.unique(Xind)))
+        return s
+
         
 def read_table(source):
     if source.split('.')[-1].lower() == 'xlsx':
@@ -601,10 +681,23 @@ def read_table(source):
     else:
         raise TypeError('Input file must be .xlsx or .csv')
 
-def info(name, X, y, Xind):
-    s = '{} dataset\n'.format(name)
-    s += '\t{} samples\n'.format(X.shape[0])
-    s += '\t{} features\n'.format(X.shape[1])
-    s += '\t{} classes\n'.format(len(pd.unique(y)))
-    s += '\t{} unique sample IDs'.format(len(pd.unique(Xind)))
-    return s
+
+if __name__ == '__main__':
+    rs = RecommenderSystem(
+        model_path = '../../uni_api/vt/labor/',
+        version = '1.0',
+        mode = 'predict',
+        test_size = 0.25,
+        min_samples_in_class = 1,
+        n_estimators = 400
+        )
+    
+    cn = 'MPN06538'
+    for w in range(10):
+        result = rs.predict_for_known_customers([cn], 1, 2020, w)
+        print(w)
+        print(result)
+
+#    mean_recalls = rs.recall_at_k(20,
+#                                  100,
+#                                  verbose=True)
