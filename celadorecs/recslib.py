@@ -646,13 +646,17 @@ class RecommenderSystem():
             printto('Recall for negative predictions:',neg, out=self.output)
         return means
     
-    def write_and_show_results(self, results, lang='en'):
+    def write_and_show_results(self, results, lang='en',
+                               fs_dir = None,
+                               url_dir = 'http://receiptparser.pythonanywhere.com/zeppelin/results/'):
         tables, footers = [], []
+        if fs_dir is None:
+            fs_dir = self.model_path
         for i,result in enumerate(results):
             now = datetime.now()
             filename = now.strftime("%Y-%m-%d_%H-%M")+'_'+str(i)+'.xlsx'
-            url = 'http://receiptparser.pythonanywhere.com/zeppelin/results/'+filename
-            filepath = os.path.join(self.model_path,
+            url = url_dir+filename
+            filepath = os.path.join(fs_dir,
                                     'results',
                                     filename)
             result.to_excel(filepath, index=False)
