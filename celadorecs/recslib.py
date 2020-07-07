@@ -440,6 +440,10 @@ class RecommenderSystem():
             X[self.contract_year] = year
         if self.contract_month in self.Xcols:
             X[self.contract_month] = month
+        if self.contract_month+'_SIN' in self.Xcols:
+            X[self.contract_month+'_SIN'] = np.sin(month/6*np.pi)
+        if self.contract_month+'_COS' in self.Xcols:
+            X[self.contract_month+'_COS'] = np.cos(month/6*np.pi)
         if self.contract_week in self.Xcols:
             X[self.contract_week] = week
         if self.model_type == 'classifier':
