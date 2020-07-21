@@ -20,7 +20,7 @@ from sklearn.svm import SVC, SVR
 from sklearn.ensemble import RandomForestClassifier,RandomForestRegressor,GradientBoostingClassifier,GradientBoostingRegressor
 
 from sklearn.model_selection import train_test_split, GridSearchCV
-from sklearn.metrics import coverage_error
+from sklearn.metrics import coverage_error, accuracy_score, precision_score, recall_score
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import make_pipeline
 
@@ -413,11 +413,11 @@ class RecommenderSystem():
             printto(grid.best_params_, out=self.output)
         elif self.mode == 'train':
             model = model.fit(X_train,y_train)
-            if self.model_type == 'classifier':
-                print_metrics()
-            elif self.model_type == 'regressor':
-                printto('R^2:',model.score(X_test,y_test))
             self.model = model            
+            if self.model_type == 'classifier':
+                printto(self.classification_metrics(), out=self.output)
+            elif self.model_type == 'regressor':
+                printto('R^2:',model.score(X_test,y_test), out=self.output)
             printto('Saving model', out=self.output)
             pickle.dump(model, open(self.model_filename, 'wb'))
             printto('Model saved to '+self.model_filename, out=self.output)
@@ -427,24 +427,24 @@ class RecommenderSystem():
                 year = None,
                 month = None,
                 week = None):
-        if year is None:
-            year = self.current_year
-        if month is None:
-            month = self.current_month
-        if week is None:
-            week = self.current_week
+#        if year is None:
+#            year = self.current_year
+#        if month is None:
+#            month = self.current_month
+#        if week is None:
+#            week = self.current_week
         X, _, customer_nums = self.__get_Xy(use='for predict', 
                                           customer_df = customer_df)
         X = X.reindex(self.Xcols, axis=1, fill_value=0)
-        if self.contract_year in self.Xcols:
+        if self.contract_year in self.Xcols and year is not None:
             X[self.contract_year] = year
-        if self.contract_month in self.Xcols:
+        if self.contract_month in self.Xcols and month is not None:
             X[self.contract_month] = month
         if self.contract_month+'_SIN' in self.Xcols:
-            X[self.contract_month+'_SIN'] = np.sin(month/6*np.pi)
+            X[self.contract_month+'_SIN'] = np.sin(X[self.contract_month]/6*np.pi)
         if self.contract_month+'_COS' in self.Xcols:
-            X[self.contract_month+'_COS'] = np.cos(month/6*np.pi)
-        if self.contract_week in self.Xcols:
+            X[self.contract_month+'_COS'] = np.cos(X[self.contract_month]/6*np.pi)
+        if self.contract_week in self.Xcols and week is not None:
             X[self.contract_week] = week
         if self.model_type == 'classifier':
             target_names = read_list(os.path.join(self.folder, 'target_names.csv'))
@@ -488,6 +488,51 @@ class RecommenderSystem():
             return None
         results = self.predict(customer_df,num_top,year,month,week)
         return results
+
+    def classification_metrics(self, 
+                               yes_class = 'yes',
+                               thresholds = [0.3, 0.35, 0.4, 0.45, 0.5,
+                                             0.55, 0.6, 0.65, 0.7],
+                               output = 'txt'):
+        pred = self.predict_for_known_customers(self.test_cnums)
+        pred = pred[[self.customer_id, yes_class]]
+        ctr = pd.read_csv(os.path.join(self.folder, 'contracts.csv'))
+        ctr = ctr[[self.customer_id, self.target_var]]
+        pred.rename(columns={yes_class:'predict_proba'}, inplace=True)
+        ctr.rename(columns={self.target_var:'real'}, inplace=True)
+        pred = pred.merge(ctr, how='left', on=self.customer_id)
+        pred.to_csv('pred.csv')
+        pred['real'] = pred.real.apply({'yes':1,'no':0}.get)
+        y_true = pred['real']
+        if output == 'txt':
+            s = 'Threshold,%\tAccuracy\tPrecision\tRecall\n'
+        elif output == 'html':
+            s = '<table><tr><td>Threshold,%</td><td>Accuracy</td><td>Precision</td><td>Recall</td></tr>'
+        for thr in thresholds:
+            y_pred = (pred['predict_proba'] > thr)
+            if output == 'txt':
+                s += f'{int(thr*100)}\t\t{accuracy_score(y_true, y_pred):.2f}\t\t'
+                s += f'{precision_score(y_true, y_pred):.2f}\t\t'
+                s += f'{recall_score(y_true, y_pred):.2f}\n'
+            elif output == 'html':
+                s += f'<tr><td>{int(thr*100)}</td><td>{accuracy_score(y_true, y_pred):.2f}</td><td>'
+                s += f'{precision_score(y_true, y_pred):.2f}</td><td>'
+                s += f'{recall_score(y_true, y_pred):.2f}</td></tr>'
+        if output == 'html':
+            s += '</table>'
+        return s
+    
+    def weights(self, num_top=20):
+        if self.model_name == 'gb':
+            wts = self.model.feature_importances_
+        df = pd.DataFrame({'Feature':self.Xcols,
+                           'Weight':wts})
+        df['abs_wt'] = df.Weight.apply(abs)
+        df.sort_values(by='abs_wt', ascending=False, inplace=True)
+        df.drop('abs_wt', inplace=True, axis=1)
+        df = df.head(num_top)
+        df.reset_index(drop=True)
+        return df
         
     def precompute(self):        
         printto('Precomputing', out=self.output)
@@ -679,7 +724,6 @@ class RecommenderSystem():
             s += '\t{} classes\n'.format(len(pd.unique(y)))
         s += '\t{} unique sample IDs'.format(len(pd.unique(Xind)))
         return s
-
         
 def read_table(source):
     if source.split('.')[-1].lower() == 'xlsx':
@@ -691,21 +735,4 @@ def read_table(source):
 
 
 if __name__ == '__main__':
-    rs = RecommenderSystem(
-        model_path = '../../uni_api/vt/labor/',
-        version = '1.0',
-        mode = 'predict',
-        test_size = 0.25,
-        min_samples_in_class = 1,
-        n_estimators = 400
-        )
-    
-    cn = 'MPN06538'
-    for w in range(10):
-        result = rs.predict_for_known_customers([cn], 1, 2020, w)
-        print(w)
-        print(result)
-
-#    mean_recalls = rs.recall_at_k(20,
-#                                  100,
-#                                  verbose=True)
+    pass
