@@ -577,25 +577,30 @@ class RecommenderSystem():
         ctr.rename(columns={self.target_var:'real'}, inplace=True)
         pred = pred.merge(ctr, how='left', on=self.customer_id)
         pred['real'] = pred.real.apply({'yes':1,'no':0}.get)
-        thresholds = range(0,101,5)
+        threshold_step = 5
+        thresholds = range(0,100, threshold_step)
         thresholds = [t/100 for t in thresholds]
-        results = []
+        x = []
+        y = []
         for thr in thresholds:
-            tp = sum((pred.real == 1)&(pred['predict_proba'] >= thr))
-            fp = sum((pred.real == 0)&(pred['predict_proba'] >= thr))
-            pc_purchase = 100 if tp+fp == 0 else int(tp/(tp+fp)*100)
-            results.append(pc_purchase)
+            cond = (pred['predict_proba'] >= thr)&(pred['predict_proba'] < thr+threshold_step/100)
+            tp = sum((pred.real == 1)&cond)
+            fp = sum((pred.real == 0)&cond)
+            if tp+fp > 0:
+                x.append(thr)
+                y.append(int(tp/(tp+fp)*100))
         fig, ax = plt.subplots()
         if lang == 'ru':
-            ax.set_xlabel('Процент покупок')
-            ax.set_ylabel('Вероятность покупки')
+            ax.set_ylabel('Процент покупок')
+            ax.set_xlabel('Вероятность покупки')
         elif lang == 'en':
-            ax.set_xlabel('Purchase percent')
-            ax.set_ylabel('Purchase probability')
-        ax.plot(results,thresholds, color='blue')
-        ax.fill_between(results,thresholds,0, facecolor='lightblue')
+            ax.set_ylabel('Purchase percent')
+            ax.set_xlabel('Purchase probability')
+        ax.plot(x,y, color='blue')
+        ax.fill_between(x,y,0, facecolor='lightblue')
         ax.grid(True)        
         fig.savefig(filepath)
+#        plt.show()
         plt.close(fig)
         return url
 
