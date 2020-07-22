@@ -11,7 +11,9 @@ from datetime import datetime
 import pickle
 import pandas as pd
 import numpy as np
+from matplotlib import pyplot as plt
 #from scipy import sparse
+
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -501,7 +503,6 @@ class RecommenderSystem():
         pred.rename(columns={yes_class:'predict_proba'}, inplace=True)
         ctr.rename(columns={self.target_var:'real'}, inplace=True)
         pred = pred.merge(ctr, how='left', on=self.customer_id)
-        pred.to_csv('pred.csv')
         pred['real'] = pred.real.apply({'yes':1,'no':0}.get)
         y_true = pred['real']
         if output == 'txt':
@@ -555,6 +556,49 @@ class RecommenderSystem():
             return res.to_html()
         return res
     
+    def classification_plot(self,
+                            yes_class = 'yes',
+                            lang='en',
+                            fs_dir = None,
+                            url_dir = 'http://receiptparser.pythonanywhere.com/'):
+        if fs_dir is None:
+            fs_dir = self.model_path
+        now = datetime.now()
+        filename = 'V'+self.version+'_'+now.strftime("%Y-%m-%d_%H-%M")+'.jpg'
+        url = url_dir+'/'+self.model_path+'/results/'+filename
+        filepath = os.path.join(fs_dir,
+                                'results',
+                                filename)
+        pred = self.predict_for_known_customers(self.test_cnums)
+        pred = pred[[self.customer_id, yes_class]]
+        ctr = pd.read_csv(os.path.join(self.folder, 'contracts.csv'))
+        ctr = ctr[[self.customer_id, self.target_var]]
+        pred.rename(columns={yes_class:'predict_proba'}, inplace=True)
+        ctr.rename(columns={self.target_var:'real'}, inplace=True)
+        pred = pred.merge(ctr, how='left', on=self.customer_id)
+        pred['real'] = pred.real.apply({'yes':1,'no':0}.get)
+        thresholds = range(0,101,5)
+        thresholds = [t/100 for t in thresholds]
+        results = []
+        for thr in thresholds:
+            tp = sum((pred.real == 1)&(pred['predict_proba'] >= thr))
+            fp = sum((pred.real == 0)&(pred['predict_proba'] >= thr))
+            pc_purchase = 100 if tp+fp == 0 else int(tp/(tp+fp)*100)
+            results.append(pc_purchase)
+        fig, ax = plt.subplots()
+        if lang == 'ru':
+            ax.set_xlabel('Процент покупок')
+            ax.set_ylabel('Вероятность покупки')
+        elif lang == 'en':
+            ax.set_xlabel('Purchase percent')
+            ax.set_ylabel('Purchase probability')
+        ax.plot(results,thresholds, color='blue')
+        ax.fill_between(results,thresholds,0, facecolor='lightblue')
+        ax.grid(True)        
+        fig.savefig(filepath)
+        plt.close(fig)
+        return url
+
     def weights(self, num_top=20):
         if self.model_name == 'gb':
             wts = self.model.feature_importances_
@@ -768,8 +812,8 @@ def read_table(source):
 
 
 if __name__ == '__main__':
-    pass
-#    rs = RecommenderSystem(model_path = '../../uni_api/vt',
-#                           mode = 'train')
-#    cs = rs.classification_stats()
-#    print(cs)
+#    pass
+    rs = RecommenderSystem(model_path = '../../uni_api/vt',
+                           mode = 'train')
+    cs = rs.classification_plot()
+    print(cs)
