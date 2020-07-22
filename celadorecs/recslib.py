@@ -521,6 +521,39 @@ class RecommenderSystem():
         if output == 'html':
             s += '</table>'
         return s
+
+    def classification_stats(self, 
+                               yes_class = 'yes',
+                               thresholds = [0.3, 0.35, 0.4, 0.45, 0.5,
+                                             0.55, 0.6, 0.65, 0.7],
+                               output = 'txt'):
+        pred = self.predict_for_known_customers(self.test_cnums)
+        pred = pred[[self.customer_id, yes_class]]
+        ctr = pd.read_csv(os.path.join(self.folder, 'contracts.csv'))
+        ctr = ctr[[self.customer_id, self.target_var]]
+        pred.rename(columns={yes_class:'predict_proba'}, inplace=True)
+        ctr.rename(columns={self.target_var:'real'}, inplace=True)
+        pred = pred.merge(ctr, how='left', on=self.customer_id)
+        pred['real'] = pred.real.apply({'yes':1,'no':0}.get)
+        res = {}
+        for thr in thresholds:
+            pred['pred'] = (pred['predict_proba'] >= thr).astype(int)
+            tp = sum((pred.real == 1)&(pred.pred==1))
+            tn = sum((pred.real == 0)&(pred.pred==0))
+            fp = sum((pred.real == 0)&(pred.pred==1))
+            fn = sum((pred.real == 1)&(pred.pred==0))
+            res[thr] = {'Вероятность выше порога, покупка есть (true positives)':tp,
+                    'Вероятность ниже порога, покупки нет (true negatives)':tn,
+                    'Вероятность выше порога, покупки нет (false positives)':fp,
+                    'Вероятность ниже порога, покупка есть (false negatives)':fn,
+                    }
+        res = pd.DataFrame(res)
+        res.columns.name = 'Порог вероятности покупки'
+        if output == 'txt':
+            return res.to_string()
+        elif output == 'html':
+            return res.to_html()
+        return res
     
     def weights(self, num_top=20):
         if self.model_name == 'gb':
@@ -736,3 +769,7 @@ def read_table(source):
 
 if __name__ == '__main__':
     pass
+#    rs = RecommenderSystem(model_path = '../../uni_api/vt',
+#                           mode = 'train')
+#    cs = rs.classification_stats()
+#    print(cs)
