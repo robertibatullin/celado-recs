@@ -217,16 +217,18 @@ class RecommenderSystem():
         ids = self.id_vars + [self.target_var]
         ids_ = [id_ for id_ in ids if id_ in data.columns]
         to_sum = data_.drop(ids_, axis=1).filter(regex='^Existing:')
-        to_sum = to_sum.join(data_[ids_])
+        if to_sum.shape[1] > 0:
+            to_sum = to_sum.join(data_[ids_])
+            result_sum = to_sum.groupby(ids_).sum()
         to_mean = data.drop(ids_, axis=1).filter(regex='(^Customer:)|(^Offer:)|(^Contract:)')
         to_mean = to_mean.join(data_[ids_])
         result_mean = to_mean.groupby(ids_).mean()
-#        print('groupby mean ready',result_mean.shape)
-        result_sum = to_sum.groupby(ids_).sum()
-#        print('groupby sum ready',result_sum.shape)
-        del data_, to_mean, to_sum
-        result = result_mean.join(result_sum)
-        del result_mean, result_sum
+        if to_sum.shape[1] > 0:
+            result = result_mean.join(result_sum)
+            del result_sum
+        else:
+            result = result_mean
+        del data_, to_mean, to_sum, result_mean
         result.reset_index(inplace=True)
         result.sort_index(axis=1, inplace=True)
         return result
@@ -415,7 +417,7 @@ class RecommenderSystem():
             printto(grid.best_params_, out=self.output)
         elif self.mode == 'train':
             model = model.fit(X_train,y_train)
-            self.model = model            
+            self.model = model         
             if self.model_type == 'classifier':
                 printto(self.classification_metrics(), out=self.output)
             elif self.model_type == 'regressor':
@@ -462,6 +464,7 @@ class RecommenderSystem():
         pp.reset_index(inplace=True)
         pp.drop_duplicates(inplace=True)
         pp = pp.groupby(self.customer_id).mean().reset_index()
+        pp.to_excel(self.model_path+'/results/pred.xlsx',index=False)
         if num_top is None: #одна таблица на всех покупателей 
             return pp
         else: #для каждого покупателя своя таблица, отсортированная по вероятности
@@ -522,43 +525,11 @@ class RecommenderSystem():
         if output == 'html':
             s += '</table>'
         return s
-
-    def classification_stats(self, 
-                               yes_class = 'yes',
-                               thresholds = [0.3, 0.35, 0.4, 0.45, 0.5,
-                                             0.55, 0.6, 0.65, 0.7],
-                               output = 'txt'):
-        pred = self.predict_for_known_customers(self.test_cnums)
-        pred = pred[[self.customer_id, yes_class]]
-        ctr = pd.read_csv(os.path.join(self.folder, 'contracts.csv'))
-        ctr = ctr[[self.customer_id, self.target_var]]
-        pred.rename(columns={yes_class:'predict_proba'}, inplace=True)
-        ctr.rename(columns={self.target_var:'real'}, inplace=True)
-        pred = pred.merge(ctr, how='left', on=self.customer_id)
-        pred['real'] = pred.real.apply({'yes':1,'no':0}.get)
-        res = {}
-        for thr in thresholds:
-            pred['pred'] = (pred['predict_proba'] >= thr).astype(int)
-            tp = sum((pred.real == 1)&(pred.pred==1))
-            tn = sum((pred.real == 0)&(pred.pred==0))
-            fp = sum((pred.real == 0)&(pred.pred==1))
-            fn = sum((pred.real == 1)&(pred.pred==0))
-            res[thr] = {'Вероятность выше порога, покупка есть (true positives)':tp,
-                    'Вероятность ниже порога, покупки нет (true negatives)':tn,
-                    'Вероятность выше порога, покупки нет (false positives)':fp,
-                    'Вероятность ниже порога, покупка есть (false negatives)':fn,
-                    }
-        res = pd.DataFrame(res)
-        res.columns.name = 'Порог вероятности покупки'
-        if output == 'txt':
-            return res.to_string()
-        elif output == 'html':
-            return res.to_html()
-        return res
-    
+   
     def classification_plot(self,
                             yes_class = 'yes',
                             lang='en',
+                            show = False,
                             fs_dir = None,
                             url_dir = 'http://receiptparser.pythonanywhere.com/'):
         if fs_dir is None:
@@ -600,7 +571,8 @@ class RecommenderSystem():
         ax.fill_between(x,y,0, facecolor='lightblue')
         ax.grid(True)        
         fig.savefig(filepath)
-#        plt.show()
+        if show:
+            plt.show()
         plt.close(fig)
         return url
 
@@ -612,7 +584,8 @@ class RecommenderSystem():
         df['abs_wt'] = df.Weight.apply(abs)
         df.sort_values(by='abs_wt', ascending=False, inplace=True)
         df.drop('abs_wt', inplace=True, axis=1)
-        df = df.head(num_top)
+        if num_top > 0:
+            df = df.head(num_top)
         df.reset_index(drop=True)
         return df
         
@@ -815,10 +788,11 @@ def read_table(source):
     else:
         raise TypeError('Input file must be .xlsx or .csv')
 
-
 if __name__ == '__main__':
 #    pass
     rs = RecommenderSystem(model_path = '../../uni_api/vt',
                            mode = 'train')
-    cs = rs.classification_plot()
-    print(cs)
+    url = rs.classification_plot()
+    
+#    wt = rs.weights(0)
+#    wt.to_excel('weights.xlsx')
