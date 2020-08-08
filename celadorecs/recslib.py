@@ -191,55 +191,108 @@ class RecommenderSystem():
             cat_cols = data.select_dtypes(include=['object'])
         num_cols = data.select_dtypes(exclude=['object'])
         num_cols.drop(self.id_vars, axis=1, inplace=True, errors='ignore')
-#        try:
-#            num_cols = num_cols.drop('Offer: Month',axis=1)
-#            cat_cols = cat_cols.join(data['Offer: Month'])
-#        except KeyError:
-#            pass
-        cat_cols = cat_cols.astype('category')    
-        one_hot = pd.get_dummies(cat_cols, drop_first=True)
-        to_drop = list(filter(lambda s:s[-3:]=='_no' \
-                              or s[-4:]=='_0.0' \
-                              or s[-2:]=='_0',
-                              one_hot.columns))
-        one_hot.drop(to_drop, axis=1, inplace=True, errors='ignore') 
-        data1 = num_cols.join(one_hot)
+        if cat_cols.shape[1] > 0:
+            cat_cols = cat_cols.astype('category')    
+            one_hot = pd.get_dummies(cat_cols, drop_first=True)
+            to_drop = list(filter(lambda s:s[-3:]=='_no' \
+                                  or s[-4:]=='_0.0' \
+                                  or s[-2:]=='_0',
+                                  one_hot.columns))
+            one_hot.drop(to_drop, axis=1, inplace=True, errors='ignore') 
+            data1 = num_cols.join(one_hot)
+        else:
+            data1 = num_cols
         if id_cols is not None:
             data1 = data1.join(id_cols)
     
         data1.sort_index(axis=1,inplace=True)
         return data1
 
-    def __group_by_id(self, data):
-        #группируем все данные одного ids в 1 строку
-        #Existing переменные суммируем (bool), Customer + Offer усредняем (num)
-        data_ = data.fillna(0)
-        ids = self.id_vars + [self.target_var]
-        ids_ = [id_ for id_ in ids if id_ in data.columns]
-        to_sum = data_.drop(ids_, axis=1).filter(regex='^Existing:')
-        if to_sum.shape[1] > 0:
-            to_sum = to_sum.join(data_[ids_])
-            result_sum = to_sum.groupby(ids_).sum()
-        to_mean = data.drop(ids_, axis=1).filter(regex='(^Customer:)|(^Offer:)|(^Contract:)')
-        to_mean = to_mean.join(data_[ids_])
-        result_mean = to_mean.groupby(ids_).mean()
-        if to_sum.shape[1] > 0:
-            result = result_mean.join(result_sum)
-            del result_sum
-        else:
-            result = result_mean
-        del data_, to_mean, to_sum, result_mean
-        result.reset_index(inplace=True)
-        result.sort_index(axis=1, inplace=True)
-        return result
+#    def __group_by_id(self, data):
+#        #группируем все данные одного ids в 1 строку
+#        #Existing переменные суммируем (bool), Customer + Offer усредняем (num)
+#        data_ = data.fillna(0)
+#        ids = self.id_vars + [self.target_var]
+#        ids_ = [id_ for id_ in ids if id_ in data.columns]
+#        to_sum = data_.drop(ids_, axis=1).filter(regex='^Existing:')
+#        if to_sum.shape[1] > 0:
+#            to_sum = to_sum.join(data_[ids_])
+#            result_sum = to_sum.groupby(ids_).sum()
+#        to_mean = data.drop(ids_, axis=1).filter(regex='(^Customer:)|(^Offer:)|(^Contract:)')
+#        to_mean = to_mean.join(data_[ids_])
+#        result_mean = to_mean.groupby(ids_).mean()
+#        if to_sum.shape[1] > 0:
+#            result = result_mean.join(result_sum)
+#            del result_sum
+#        else:
+#            result = result_mean
+#        del data_, to_mean, to_sum, result_mean
+#        result.reset_index(inplace=True)
+#        result.sort_index(axis=1, inplace=True)
+#        return result
     
     def __filter_small_classes(self, data):
         target_vals = pd.value_counts(data[self.target_var])
         popular_target_vals = target_vals[target_vals >= self.threshold].index
         filtered = data[data[self.target_var].isin(popular_target_vals)]
         return filtered
-        
-    def __get_Xy(self,
+
+#    def __get_Xy(self,
+#               use = 'for train', #or for predict
+#               customer_df = None
+#               ):
+#        if customer_df is None:
+#            customers = pd.read_csv(os.path.join(self.folder, 'customers.csv'))
+#        else:
+#            customers = customer_df
+#        #если несколько записей для 1 клиента:
+#        #кодируем и группируем
+##        print('customers',customers.shape)
+#        offers = pd.read_csv(os.path.join(self.folder, 'offers.csv'))
+##        print('offers',offers.shape)
+#        contracts = pd.read_csv(os.path.join(self.folder, 'contracts.csv'))
+##        print('contracts',contracts.shape)
+#        how = 'left' if use == 'for train' else 'right'            
+#        off_contr = contracts.merge(offers, on=self.offer_id, how=how)
+#        data = off_contr.merge(customers, on=self.customer_id, how=how)
+##        print('data',data.shape)
+#        del off_contr, contracts, offers, customers
+#        if use == 'for train':
+#            data.dropna(inplace=True)
+##        print('data dropna',data.shape)
+#        data.drop_duplicates().reset_index(drop=True, inplace=True)
+##        print('data drop dupl',data.shape)
+#        target = data[self.target_var]
+#        ids = data[self.id_vars]
+#        data = data.reindex(self.vars_to_train, axis=1)
+#        data = self.__normalize_encode(data.drop(self.target_var, axis=1))
+#        data = data.join(target).join(ids)
+##        print('data encoded',data.shape)
+#        data = self.__group_by_id(data)
+##        print('data grouped',data.shape)
+#        if use == 'for train' and self.model_type == 'classifier' and self.threshold > 1:
+#            data = self.__filter_small_classes(data)  
+##            print('data filtered',data.shape)
+#        target = data[self.target_var]
+#        ids = data[self.id_vars]
+#        if use == 'for train' and self.model_type == 'classifier':
+#            target_encoded, target_unique = pd.factorize(target)
+#            with open(os.path.join(self.folder, 'target_names.csv'),'w') as f:
+#                f.write('\n'.join(target_unique))
+#                target = target_encoded
+#        X_index = data[self.customer_id]
+#        X = data.drop(self.id_vars+[self.target_var], axis=1, errors='ignore')
+#        X_cols = X.columns
+#        if use == 'for train' and self.model_type == 'classifier' and self.threshold > 1:
+#            printto('Filtered off classes with less than {} members'.format(self.threshold),
+#                    out=self.output)
+#            printto(self.info('Full', X, target, X_index), out=self.output)
+#        if use == 'for train':
+#            return X, target, X_cols, X_index
+#        elif use == 'for predict':
+#            return X.fillna(0), X_cols, X_index
+    
+    def __get_Xy_new(self,
                use = 'for train', #or for predict
                customer_df = None
                ):
@@ -247,11 +300,41 @@ class RecommenderSystem():
             customers = pd.read_csv(os.path.join(self.folder, 'customers.csv'))
         else:
             customers = customer_df
+        #если несколько записей для 1 клиента:
+        #кодируем, группируем по Existing суммированием
 #        print('customers',customers.shape)
+        customers.drop_duplicates(inplace=True)
+#        print('customers after drop dupl',customers.shape)
+        customers = self.__normalize_encode(customers)
+#        print('customers after encode',customers.shape)
+        customer_ids = customers[self.customer_id]
+        if len(customer_ids) > len(customer_ids.drop_duplicates()):
+            to_sum = customers.filter(regex='^Existing:')
+            if to_sum.shape[1] > 0:
+                to_sum = to_sum.join(customer_ids)
+                customers = to_sum.groupby(self.customer_id).sum().reset_index()
+                customers.sort_index(axis=1, inplace=True)
+#                print('customers after groupby',customers.shape)
+            
         offers = pd.read_csv(os.path.join(self.folder, 'offers.csv'))
+        #предполагаю, что уникальные, не группирую
 #        print('offers',offers.shape)
+        offers.drop_duplicates(inplace=True)
+#        print('offers after drop dupl',offers.shape)
+        offers = self.__normalize_encode(offers)
+#        print('offers after encode',offers.shape)
+        
         contracts = pd.read_csv(os.path.join(self.folder, 'contracts.csv'))
+        #предполагаю, что уникальные, не группирую
 #        print('contracts',contracts.shape)
+        contracts.drop_duplicates(inplace=True)
+#        print('contracts after drop dupl',contracts.shape)
+        target = contracts[self.target_var]
+        contracts = self.__normalize_encode(
+                contracts.drop(self.target_var, axis=1))
+        contracts = contracts.join(target)
+#        print('contracts after encode',contracts.shape)
+
         how = 'left' if use == 'for train' else 'right'            
         off_contr = contracts.merge(offers, on=self.offer_id, how=how)
         data = off_contr.merge(customers, on=self.customer_id, how=how)
@@ -259,20 +342,16 @@ class RecommenderSystem():
         del off_contr, contracts, offers, customers
         if use == 'for train':
             data.dropna(inplace=True)
-#        print('data dropna',data.shape)
+#            print('data dropna',data.shape)
         data.drop_duplicates().reset_index(drop=True, inplace=True)
 #        print('data drop dupl',data.shape)
         target = data[self.target_var]
         ids = data[self.id_vars]
         data = data.reindex(self.vars_to_train, axis=1)
-        data = self.__normalize_encode(data.drop(self.target_var, axis=1))
-        data = data.join(target).join(ids)
-#        print('data encoded',data.shape)
-        data = self.__group_by_id(data)
-#        print('data grouped',data.shape)
+        data = data.join(ids)
         if use == 'for train' and self.model_type == 'classifier' and self.threshold > 1:
             data = self.__filter_small_classes(data)  
-#            print('data filtered',data.shape)
+            print('data filtered',data.shape)
         target = data[self.target_var]
         ids = data[self.id_vars]
         if use == 'for train' and self.model_type == 'classifier':
@@ -291,7 +370,7 @@ class RecommenderSystem():
             return X, target, X_cols, X_index
         elif use == 'for predict':
             return X.fillna(0), X_cols, X_index
-    
+
     def train(self, **kwargs):
         
         def cov_error(clf_, X_, y_, class_names = None): #for scoring
@@ -314,7 +393,7 @@ class RecommenderSystem():
                                    y_test,
                                    class_names = pd.unique(y_train)), out=self.output)
             
-        X, y, self.Xcols, Xind = self.__get_Xy()
+        X, y, self.Xcols, Xind = self.__get_Xy_new()
         with open(os.path.join(self.folder, 'model_cols.txt'), 'w') as f:
                 f.write('\n'.join(self.Xcols))
         
@@ -437,7 +516,7 @@ class RecommenderSystem():
 #            month = self.current_month
 #        if week is None:
 #            week = self.current_week
-        X, _, customer_nums = self.__get_Xy(use='for predict', 
+        X, _, customer_nums = self.__get_Xy_new(use='for predict', 
                                           customer_df = customer_df)
         X = X.reindex(self.Xcols, axis=1, fill_value=0)
         if self.contract_year in self.Xcols and year is not None:
@@ -540,7 +619,10 @@ class RecommenderSystem():
         filepath = os.path.join(fs_dir,
                                 'results',
                                 filename)
-        pred = self.predict_for_known_customers(self.test_cnums)
+        try:
+            pred = self.predict_for_known_customers(self.test_cnums)
+        except AttributeError:
+            pred = self.predict_for_known_customers()
         pred = pred[[self.customer_id, yes_class]]
         ctr = pd.read_csv(os.path.join(self.folder, 'contracts.csv'))
         ctr = ctr[[self.customer_id, self.target_var]]
@@ -656,11 +738,6 @@ class RecommenderSystem():
         new_version_ = [version_[0], str(int(version_[1])+1)]
         new_version = '.'.join(new_version_)
         updated = self.unite(new, new_version)
-
-#        for filename in os.listdir(new.folder):
-#            os.remove(os.path.join(new.folder, filename))
-#        os.removedirs(new.folder)
-
         updated.set_mode('train')
         updated.train()
         updated.precompute()
@@ -791,7 +868,7 @@ def read_table(source):
 if __name__ == '__main__':
 #    pass
     rs = RecommenderSystem(model_path = '../../uni_api/vt',
-                           mode = 'train')
+                           mode = 'predict')
     url = rs.classification_plot()
     
 #    wt = rs.weights(0)
