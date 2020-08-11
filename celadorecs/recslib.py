@@ -384,6 +384,7 @@ class RecommenderSystem():
         ctr_yes = ctr[ctr[self.target_var] != 'no'].copy()
         ctr_yes['last_contract_absmonth'] = ctr_yes['absmonth']
         ctr_yes = ctr_yes[[self.customer_id,'last_contract_absmonth']]
+        ctr_yes = ctr_yes.groupby(self.customer_id).max().reset_index()
         ctr = ctr.merge(ctr_yes, on = self.customer_id, how='left')
         ctr['MONTHS_FROM_LAST_CONTRACT'] = ctr['absmonth']-ctr['last_contract_absmonth']
         ctr['MONTHS_FROM_LAST_CONTRACT'] = ctr['MONTHS_FROM_LAST_CONTRACT'].apply(
