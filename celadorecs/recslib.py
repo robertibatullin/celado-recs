@@ -58,6 +58,12 @@ class RecommenderSystem():
         self.contract_year = dct['CONTRACT YEAR']
         self.contract_year_epoch = int(dct['CONTRACT YEAR EPOCH'])
         try:
+            self.months_from_last_contract = (dct['MONTHS_FROM_LAST_CONTRACT'] == 'True')
+        except KeyError:
+            self.months_from_last_contract = False
+        if self.months_from_last_contract:
+            self.vars_to_train.append('MONTHS_FROM_LAST_CONTRACT')
+        try:
             self.contract_month = dct['CONTRACT MONTH']
         except KeyError:
             self.contract_month = None
@@ -153,6 +159,15 @@ class RecommenderSystem():
             mean_recalls = self.recall_at_k(10, 
                                             500, 
                                             verbose=False)
+            
+    def customers(self):
+        return pd.read_csv(os.path.join(self.folder, 'customers.csv'))
+            
+    def offers(self):
+        return pd.read_csv(os.path.join(self.folder, 'offers.csv'))
+    
+    def contracts(self):
+        return pd.read_csv(os.path.join(self.folder, 'contracts.csv'))
                         
     def set_mode(self, new_mode):
         self.mode = new_mode
@@ -297,7 +312,7 @@ class RecommenderSystem():
                customer_df = None
                ):
         if customer_df is None:
-            customers = pd.read_csv(os.path.join(self.folder, 'customers.csv'))
+            customers = self.customers()
         else:
             customers = customer_df
         #если несколько записей для 1 клиента:
@@ -305,35 +320,18 @@ class RecommenderSystem():
 #        print('customers',customers.shape)
         customers.drop_duplicates(inplace=True)
 #        print('customers after drop dupl',customers.shape)
-        customers = self.__normalize_encode(customers)
-#        print('customers after encode',customers.shape)
-        customer_ids = customers[self.customer_id]
-        if len(customer_ids) > len(customer_ids.drop_duplicates()):
-            to_sum = customers.filter(regex='^Existing:')
-            if to_sum.shape[1] > 0:
-                to_sum = to_sum.join(customer_ids)
-                customers = to_sum.groupby(self.customer_id).sum().reset_index()
-                customers.sort_index(axis=1, inplace=True)
-#                print('customers after groupby',customers.shape)
-            
-        offers = pd.read_csv(os.path.join(self.folder, 'offers.csv'))
-        #предполагаю, что уникальные, не группирую
+
+        offers = self.offers()
 #        print('offers',offers.shape)
         offers.drop_duplicates(inplace=True)
 #        print('offers after drop dupl',offers.shape)
-        offers = self.__normalize_encode(offers)
-#        print('offers after encode',offers.shape)
         
-        contracts = pd.read_csv(os.path.join(self.folder, 'contracts.csv'))
-        #предполагаю, что уникальные, не группирую
+        contracts = self.contracts()
 #        print('contracts',contracts.shape)
         contracts.drop_duplicates(inplace=True)
 #        print('contracts after drop dupl',contracts.shape)
-        target = contracts[self.target_var]
-        contracts = self.__normalize_encode(
-                contracts.drop(self.target_var, axis=1))
-        contracts = contracts.join(target)
-#        print('contracts after encode',contracts.shape)
+        if self.months_from_last_contract:
+            contracts = self.add_months_from_last_contract(contracts)
 
         how = 'left' if use == 'for train' else 'right'            
         off_contr = contracts.merge(offers, on=self.offer_id, how=how)
@@ -345,15 +343,22 @@ class RecommenderSystem():
 #            print('data dropna',data.shape)
         data.drop_duplicates().reset_index(drop=True, inplace=True)
 #        print('data drop dupl',data.shape)
-        target = data[self.target_var]
         ids = data[self.id_vars]
         data = data.reindex(self.vars_to_train, axis=1)
         data = data.join(ids)
         if use == 'for train' and self.model_type == 'classifier' and self.threshold > 1:
             data = self.__filter_small_classes(data)  
-            print('data filtered',data.shape)
+#            print('data filtered',data.shape)
         target = data[self.target_var]
-        ids = data[self.id_vars]
+        data = self.__normalize_encode(data.drop(self.target_var, axis=1))
+        data = data.join(target)
+#        print('data after encode', data.info())
+        
+        #группируем кастомеров по Existing
+        #ПОКА УБИРАЮ, для старой версии оставляю get_Xy - потом добавлю если надо
+#        суммирование по Existing должно быть там, где покупатель = компания (Zeppelin)
+#        и не должно быть, где покупатель - машина (Восточка)
+        
         if use == 'for train' and self.model_type == 'classifier':
             target_encoded, target_unique = pd.factorize(target)
             with open(os.path.join(self.folder, 'target_names.csv'),'w') as f:
@@ -370,6 +375,19 @@ class RecommenderSystem():
             return X, target, X_cols, X_index
         elif use == 'for predict':
             return X.fillna(0), X_cols, X_index
+        
+    def add_months_from_last_contract(self, ctr):
+        #добавляем в contracts столбец: месяцы после последнего успешного контракта
+        ctr['absmonth'] = ctr[self.contract_year]*12+ctr[self.contract_month]
+        ctr_yes = ctr[ctr[self.target_var] != 'no'].copy()
+        ctr_yes['last_contract_absmonth'] = ctr_yes['absmonth']
+        ctr_yes = ctr_yes[[self.customer_id,'last_contract_absmonth']]
+        ctr = ctr.merge(ctr_yes, on = self.customer_id, how='left')
+        ctr['MONTHS_FROM_LAST_CONTRACT'] = ctr['absmonth']-ctr['last_contract_absmonth']
+        ctr['MONTHS_FROM_LAST_CONTRACT'] = ctr['MONTHS_FROM_LAST_CONTRACT'].apply(
+                lambda x:0 if x<0 else x)
+        ctr.drop(['absmonth','last_contract_absmonth'], axis=1, inplace=True)
+        return ctr
 
     def train(self, **kwargs):
         
@@ -420,6 +438,7 @@ class RecommenderSystem():
         printto (self.info('Train', X_train, y_train, self.train_cnums), out=self.output)
         printto (self.info('Test', X_test, y_test, self.test_cnums), out=self.output)
         
+           
 #        X_train = sparse.csr_matrix(X_train)
 #        X_test = sparse.csr_matrix(X_test)
         
@@ -565,7 +584,7 @@ class RecommenderSystem():
                                     year = None,
                                     month = None,
                                     week = None):
-        customer_df = pd.read_csv(os.path.join(self.folder, 'customers.csv'))
+        customer_df = self.customers()
         if customer_ids is not None:
             customer_df = customer_df[customer_df[self.customer_id].isin(customer_ids)]
         if len(customer_df) == 0:
@@ -580,7 +599,7 @@ class RecommenderSystem():
                                output = 'txt'):
         pred = self.predict_for_known_customers(self.test_cnums)
         pred = pred[[self.customer_id, yes_class]]
-        ctr = pd.read_csv(os.path.join(self.folder, 'contracts.csv'))
+        ctr = self.contracts()
         ctr = ctr[[self.customer_id, self.target_var]]
         pred.rename(columns={yes_class:'predict_proba'}, inplace=True)
         ctr.rename(columns={self.target_var:'real'}, inplace=True)
@@ -624,7 +643,7 @@ class RecommenderSystem():
         except AttributeError:
             pred = self.predict_for_known_customers()
         pred = pred[[self.customer_id, yes_class]]
-        ctr = pd.read_csv(os.path.join(self.folder, 'contracts.csv'))
+        ctr = self.contracts()
         ctr = ctr[[self.customer_id, self.target_var]]
         pred.rename(columns={yes_class:'predict_proba'}, inplace=True)
         ctr.rename(columns={self.target_var:'real'}, inplace=True)
@@ -723,7 +742,7 @@ class RecommenderSystem():
         return df
 
     def is_really_sold(self, customer, offer):
-        df = pd.read_csv(os.path.join(self.folder,'contracts.csv'))
+        df = self.contracts()
         rs = df[(df[self.customer_id]==customer) & (df[self.target_var]==offer)]
         res = 'yes' if len(rs)>0 else 'no'
         return res
@@ -750,7 +769,7 @@ class RecommenderSystem():
         return updated, log_str
 
     def get_real_sells(self, customer_id):
-        contracts = pd.read_csv(os.path.join(self.folder,'contracts.csv'))
+        contracts = self.contracts()
         real_sells = contracts[contracts[self.customer_id] == customer_id][self.target_var]
         real_sells.drop_duplicates(inplace=True)
         return real_sells
@@ -866,10 +885,11 @@ def read_table(source):
         raise TypeError('Input file must be .xlsx or .csv')
 
 if __name__ == '__main__':
-#    pass
     rs = RecommenderSystem(model_path = '../../uni_api/vt',
-                           mode = 'predict')
-    url = rs.classification_plot()
-    
+                           version = 'test',
+                           mode = 'train',
+                           test_size = 0,
+                           min_samples_in_class = 1)
+#    url = rs.classification_plot()    
 #    wt = rs.weights(0)
 #    wt.to_excel('weights.xlsx')
