@@ -209,8 +209,7 @@ class RecommenderSystem():
         if cat_cols.shape[1] > 0:
             cat_cols = cat_cols.astype('category')    
             one_hot = pd.get_dummies(cat_cols, 
-                                     drop_first = True,
-                                     sparse = True).astype(np.int8)
+                                     drop_first = True).astype(np.int8)
             to_drop = list(filter(lambda s:s[-3:]=='_no' \
                                   or s[-4:]=='_0.0' \
                                   or s[-2:]=='_0',
