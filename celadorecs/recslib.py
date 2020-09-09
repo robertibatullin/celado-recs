@@ -631,7 +631,7 @@ class RecommenderSystem():
                             lang='en',
                             show = False,
                             fs_dir = None,
-                            url_dir = 'http://receiptparser.pythonanywhere.com/'):
+                            url_dir = 'http://receiptparser.pythonanywhere.com'):
         if fs_dir is None:
             fs_dir = self.model_path
         now = datetime.now()
