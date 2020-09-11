@@ -528,9 +528,10 @@ class RecommenderSystem():
 
     def predict(self, customer_df, 
                 num_top = None,
-                year = None,
-                month = None,
-                week = None):
+                contract_data = None):
+#                year = None,
+#                month = None,
+#                week = None):
 #        if year is None:
 #            year = self.current_year
 #        if month is None:
@@ -540,16 +541,22 @@ class RecommenderSystem():
         X, _, customer_nums = self.__get_Xy_new(use='for predict', 
                                           customer_df = customer_df)
         X = X.reindex(self.Xcols, axis=1, fill_value=0)
-        if self.contract_year in self.Xcols and year is not None:
-            X[self.contract_year] = year
-        if self.contract_month in self.Xcols and month is not None:
-            X[self.contract_month] = month
-        if self.contract_month+'_SIN' in self.Xcols:
-            X[self.contract_month+'_SIN'] = np.sin(X[self.contract_month]/6*np.pi)
-        if self.contract_month+'_COS' in self.Xcols:
-            X[self.contract_month+'_COS'] = np.cos(X[self.contract_month]/6*np.pi)
-        if self.contract_week in self.Xcols and week is not None:
-            X[self.contract_week] = week
+        
+        for key in contract_data:
+            if key in self.Xcols:
+                X[key] = contract_data[key]
+
+#        if self.contract_year in self.Xcols and year is not None:
+#            X[self.contract_year] = year
+#        if self.contract_month in self.Xcols and month is not None:
+#            X[self.contract_month] = month
+#        if self.contract_month+'_SIN' in self.Xcols:
+#            X[self.contract_month+'_SIN'] = np.sin(X[self.contract_month]/6*np.pi)
+#        if self.contract_month+'_COS' in self.Xcols:
+#            X[self.contract_month+'_COS'] = np.cos(X[self.contract_month]/6*np.pi)
+#        if self.contract_week in self.Xcols and week is not None:
+#            X[self.contract_week] = week
+
         if self.model_type == 'classifier':
             target_names = read_list(os.path.join(self.folder, 'target_names.csv'))
             data = self.model.predict_proba(X)
@@ -564,7 +571,7 @@ class RecommenderSystem():
         pp.reset_index(inplace=True)
         pp.drop_duplicates(inplace=True)
         pp = pp.groupby(self.customer_id).mean().reset_index()
-        pp.to_excel(self.model_path+'/results/pred.xlsx',index=False)
+#        pp.to_excel(self.model_path+'/results/pred.xlsx',index=False)
         if num_top is None: #одна таблица на всех покупателей 
             return pp
         else: #для каждого покупателя своя таблица, отсортированная по вероятности
@@ -583,15 +590,17 @@ class RecommenderSystem():
     def predict_for_known_customers(self, 
                                     customer_ids=None, 
                                     num_top = None,
-                                    year = None,
-                                    month = None,
-                                    week = None):
+                                    contract_data=None):
+#                                    year = None,
+#                                    month = None,
+#                                    week = None):
         customer_df = self.customers()
         if customer_ids is not None:
             customer_df = customer_df[customer_df[self.customer_id].isin(customer_ids)]
         if len(customer_df) == 0:
             return None
-        results = self.predict(customer_df,num_top,year,month,week)
+#        results = self.predict(customer_df,num_top,year,month,week)
+        results = self.predict(customer_df,num_top,contract_data)
         return results
 
     def classification_metrics(self, 
@@ -627,11 +636,11 @@ class RecommenderSystem():
         return s
    
     def classification_plot(self,
+                            url_dir,
                             yes_class = 'yes',
                             lang='en',
                             show = False,
-                            fs_dir = None,
-                            url_dir = 'http://receiptparser.pythonanywhere.com'):
+                            fs_dir = None):
         if fs_dir is None:
             fs_dir = self.model_path
         now = datetime.now()
