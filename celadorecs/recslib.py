@@ -517,27 +517,18 @@ class RecommenderSystem():
             printto(grid.best_params_, out=self.output)
         elif self.mode == 'train':
             model = model.fit(X_train,y_train)
-            self.model = model         
+            self.model = model
+            printto('Saving model', out=self.output)
+            pickle.dump(model, open(self.model_filename, 'wb'))
+            printto('Model saved to '+self.model_filename, out=self.output)
             if self.model_type == 'classifier':
                 printto(self.classification_metrics(), out=self.output)
             elif self.model_type == 'regressor':
                 printto('R^2:',model.score(X_test,y_test), out=self.output)
-            printto('Saving model', out=self.output)
-            pickle.dump(model, open(self.model_filename, 'wb'))
-            printto('Model saved to '+self.model_filename, out=self.output)
 
     def predict(self, customer_df, 
                 num_top = None,
                 contract_data = None):
-#                year = None,
-#                month = None,
-#                week = None):
-#        if year is None:
-#            year = self.current_year
-#        if month is None:
-#            month = self.current_month
-#        if week is None:
-#            week = self.current_week
         X, _, customer_nums = self.__get_Xy_new(use='for predict', 
                                           customer_df = customer_df)
         X = X.reindex(self.Xcols, axis=1, fill_value=0)
@@ -545,17 +536,6 @@ class RecommenderSystem():
         for key in contract_data:
             if key in self.Xcols:
                 X[key] = contract_data[key]
-
-#        if self.contract_year in self.Xcols and year is not None:
-#            X[self.contract_year] = year
-#        if self.contract_month in self.Xcols and month is not None:
-#            X[self.contract_month] = month
-#        if self.contract_month+'_SIN' in self.Xcols:
-#            X[self.contract_month+'_SIN'] = np.sin(X[self.contract_month]/6*np.pi)
-#        if self.contract_month+'_COS' in self.Xcols:
-#            X[self.contract_month+'_COS'] = np.cos(X[self.contract_month]/6*np.pi)
-#        if self.contract_week in self.Xcols and week is not None:
-#            X[self.contract_week] = week
 
         if self.model_type == 'classifier':
             target_names = read_list(os.path.join(self.folder, 'target_names.csv'))
@@ -591,15 +571,11 @@ class RecommenderSystem():
                                     customer_ids=None, 
                                     num_top = None,
                                     contract_data=None):
-#                                    year = None,
-#                                    month = None,
-#                                    week = None):
         customer_df = self.customers()
         if customer_ids is not None:
             customer_df = customer_df[customer_df[self.customer_id].isin(customer_ids)]
         if len(customer_df) == 0:
             return None
-#        results = self.predict(customer_df,num_top,year,month,week)
         results = self.predict(customer_df,num_top,contract_data)
         return results
 
@@ -896,8 +872,8 @@ def read_table(source):
         raise TypeError('Input file must be .xlsx or .csv')
 
 if __name__ == '__main__':
-    rs = RecommenderSystem(model_path = '../../uni_api/vt',
-                           version = 'test',
+    rs = RecommenderSystem(model_path = '../../uni_api/vtpart',
+                           version = '0.0',
                            mode = 'train',
                            test_size = 0,
                            min_samples_in_class = 1)
